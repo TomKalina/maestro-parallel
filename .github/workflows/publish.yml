@@ -1,0 +1,71 @@
+name: Publish to JSR
+
+# Publishes the package to https://jsr.io/@kaln/maestro-parallel on every
+# semver tag push (e.g. `v0.2.0`). Tag the commit you want released:
+#
+#   git tag v0.2.0
+#   git push origin v0.2.0
+#
+# Authentication uses GitHub OIDC — no token is stored. JSR trusts the
+# repository via id-token: write. The first publish must be initiated
+# manually (`deno publish`) from a maintainer's machine to claim the
+# scope; every subsequent release runs here.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (skip actual publish)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Verify tag matches deno.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version=$(jq -r .version deno.json)
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag v$tag does not match deno.json version $version"
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME matches deno.json version $version"
+
+      - name: Type check
+        run: deno check mod.ts cli.ts src/*.ts
+
+      - name: Lint
+        run: deno lint
+
+      - name: Format check
+        run: deno fmt --check
+
+      - name: Publish to JSR (dry run)
+        if: inputs.dry_run == true
+        run: deno publish --dry-run
+
+      - name: Publish to JSR
+        if: inputs.dry_run != true
+        run: deno publish

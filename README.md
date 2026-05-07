@@ -224,6 +224,22 @@ Deno.exit(code);
 - **iOS `clearState: true`** in flows is broken on Maestro 2.5.x; this
   package clears state from the runner instead.
 
+## Releasing
+
+Tag the commit on `main` with the matching version from `deno.json`:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The `publish.yml` workflow runs `deno check` / `lint` / `fmt --check` and
+publishes to JSR via GitHub OIDC (no token in secrets). To dry-run without
+publishing, trigger the workflow manually with `dry_run: true`.
+
+The first publish must be initiated locally with `deno publish` to claim
+the `@kaln` JSR scope; every release after that goes through the workflow.
+
 ## Acknowledgements
 
 Originally extracted from a runner built for the Shoptet admin mobile app
