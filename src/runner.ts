@@ -55,6 +55,12 @@ export async function makeShardConfig(cwd: string, configPath: string): Promise<
   return tmp;
 }
 
+// Resolve which paths to hand to `maestro test`: caller-supplied subset
+// when non-empty, otherwise the configured flows directory.
+function flowTargets(config: ResolvedConfig, flows?: string[]): string[] {
+  return flows && flows.length > 0 ? flows : [config.flowsDir];
+}
+
 // Run Maestro on a single device. One process per device, plain `maestro test`
 // without --shard-all. Maestro 2.5+ fixed the Android dadb host port race so
 // multiple Maestro processes can target several Android devices at once.
@@ -65,6 +71,7 @@ export async function runDevice(
   cwd: string,
   outBase: string,
   config: ResolvedConfig,
+  flows?: string[],
 ): Promise<RunResult> {
   const outDir = join(outBase, deviceSlug(d));
   await Deno.mkdir(outDir, { recursive: true });
@@ -85,7 +92,7 @@ export async function runDevice(
     join(outDir, 'report.xml'),
     '--no-ansi',
     ...envFlags(config.maestroEnv),
-    config.flowsDir,
+    ...flowTargets(config, flows),
   ];
 
   const prefix = devicePrefix(d, color, prefixWidth);
@@ -118,6 +125,7 @@ export async function runShardGroup(
   outBase: string,
   shardConfigPath: string | null,
   config: ResolvedConfig,
+  flows?: string[],
 ): Promise<GroupRunResult> {
   const outDir = join(outBase, `${platform}-shard`);
   await Deno.mkdir(outDir, { recursive: true });
@@ -141,7 +149,7 @@ export async function runShardGroup(
     `--shard-all=${ids.length}`,
     ...(shardConfigPath ? ['--config', shardConfigPath] : []),
     ...envFlags(config.maestroEnv),
-    config.flowsDir,
+    ...flowTargets(config, flows),
   ];
 
   const tagLabel = `${platform === 'android' ? 'and' : 'ios'}:*`;

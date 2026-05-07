@@ -10,11 +10,26 @@ import { setupIosSim } from './setupIosSim.ts';
 import type { Device, Platform } from './types.ts';
 import { C, log } from './ui.ts';
 
+// Default screen-off timeout we apply during a run: 30 minutes. Long enough
+// that even a slow suite never blanks the display mid-test, but bounded so
+// the device doesn't end up burning AMOLED if the runner crashes before
+// `restoreAndroidDevices` runs.
+const ANDROID_TEST_SCREEN_OFF_TIMEOUT_MS = 30 * 60 * 1000;
+
 // Wake every Android device and keep its screen on so Maestro can interact
 // with the app. A locked screen leaves NotificationShade focused above the
 // activity, the surface is black, and every test fails with "Element not
-// found". `svc power stayon true` requires USB power, which is the case
-// here.
+// found".
+//
+// `svc power stayon true` requires USB power, which is the case for USB
+// phones. Simulators ignore it, but the call is harmless. We additionally:
+//   - bump `screen_off_timeout` to 30 min (some OEMs override stayon)
+//   - disable `screen_off_timeout_adaptive` (Pixel adaptive sleep dims)
+//   - `wm dismiss-keyguard` so the lock screen doesn't intercept input
+//
+// Originals are not snapshotted: `restoreAndroidDevices` reverts to known-good
+// defaults rather than per-device originals because some OEMs return errors
+// when reading certain system settings on non-rooted shells.
 export async function wakeAndroidDevices(devices: Device[]): Promise<void> {
   const androids = devices.filter((d) => d.platform === 'android');
   if (androids.length === 0) return;
@@ -22,10 +37,71 @@ export async function wakeAndroidDevices(devices: Device[]): Promise<void> {
     await run('adb', ['-s', d.id, 'shell', 'input', 'keyevent', 'KEYCODE_WAKEUP']);
     await run('adb', ['-s', d.id, 'shell', 'input', 'keyevent', 'KEYCODE_MENU']);
     await run('adb', ['-s', d.id, 'shell', 'svc', 'power', 'stayon', 'true']);
+    await run('adb', [
+      '-s',
+      d.id,
+      'shell',
+      'settings',
+      'put',
+      'system',
+      'screen_off_timeout',
+      String(ANDROID_TEST_SCREEN_OFF_TIMEOUT_MS),
+    ]);
+    await run('adb', [
+      '-s',
+      d.id,
+      'shell',
+      'settings',
+      'put',
+      'secure',
+      'screen_off_timeout_adaptive',
+      '0',
+    ]);
+    await run('adb', ['-s', d.id, 'shell', 'wm', 'dismiss-keyguard']);
   }));
   log(
-    `${C.dim}woke ${androids.length} Android device(s) and enabled stay-on-while-charging${C.reset}`,
+    `${C.dim}woke ${androids.length} Android device(s): stayon, 30m timeout, adaptive off, keyguard dismissed${C.reset}`,
   );
+}
+
+// Revert the changes wakeAndroidDevices made so the device returns to stock
+// display behaviour. Best-effort: errors are swallowed because by the time
+// this runs the suite is already done and a teardown failure must not mask
+// a test failure.
+//
+// Defaults applied:
+//   - stayon false (screen sleeps when idle)
+//   - screen_off_timeout 30s (Android system default)
+//   - screen_off_timeout_adaptive 1 (re-enable adaptive sleep)
+export async function restoreAndroidDevices(devices: Device[]): Promise<void> {
+  const androids = devices.filter((d) => d.platform === 'android');
+  if (androids.length === 0) return;
+  await Promise.all(androids.map(async (d) => {
+    try {
+      await run('adb', ['-s', d.id, 'shell', 'svc', 'power', 'stayon', 'false']);
+      await run('adb', [
+        '-s',
+        d.id,
+        'shell',
+        'settings',
+        'put',
+        'system',
+        'screen_off_timeout',
+        '30000',
+      ]);
+      await run('adb', [
+        '-s',
+        d.id,
+        'shell',
+        'settings',
+        'put',
+        'secure',
+        'screen_off_timeout_adaptive',
+        '1',
+      ]);
+    } catch { /* ignore — teardown must not crash the runner */ }
+  }));
+  log(`${C.dim}restored display defaults on ${androids.length} Android device(s)${C.reset}`);
 }
 
 // Wipe app data on every selected device so each test run starts from a

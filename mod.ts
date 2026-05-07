@@ -15,6 +15,12 @@ export {
 
 export { discoverDevices } from './src/devices.ts';
 export { setupAllBootedSimulators, setupIosSim } from './src/setupIosSim.ts';
+export {
+  buildAndInstall,
+  clearAppState,
+  restoreAndroidDevices,
+  wakeAndroidDevices,
+} from './src/setup.ts';
 export { runMaestroParallel, type RunOptions } from './src/main.ts';
 export type {
   Device,

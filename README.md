@@ -120,7 +120,13 @@ that locates the build artifact in Xcode's DerivedData.
 ## CLI
 
 ```
-maestro-parallel [options]
+maestro-parallel [options] [flow ...]
+
+Arguments:
+  flow                  Specific Maestro flow file(s) or directory(ies) to
+                        run. Passed straight to `maestro test`. Shell glob
+                        expansion works (e.g. .maestro/flows/*.yaml).
+                        When omitted, the configured flowsDir is used.
 
 Options:
   -c, --config <path>   Path to config file (default: auto-discover
@@ -134,6 +140,24 @@ Options:
 maestro-parallel setup-ios-sim
                         Disable AutoFill Passwords on every booted simulator.
                         Useful before single-device runs too.
+```
+
+### Run a hand-picked set of flows
+
+```bash
+# Two specific flows on the picked devices
+maestro-parallel .maestro/flows/login_flow.yaml .maestro/flows/checkout.yaml
+
+# Glob expansion via the shell
+maestro-parallel .maestro/flows/login_*.yaml
+```
+
+The same is available on the library API via `RunOptions.flows`:
+
+```ts
+await runMaestroParallel(config, {
+  flows: ['.maestro/flows/login_flow.yaml', '.maestro/flows/checkout.yaml'],
+});
 ```
 
 ## Configuration

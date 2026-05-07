@@ -11,8 +11,14 @@ const HELP = `
 maestro-parallel — run Maestro flows in parallel on multiple local devices.
 
 Usage:
-  maestro-parallel [options]
+  maestro-parallel [options] [flow ...]
   maestro-parallel setup-ios-sim     # disable AutoFill on every booted sim
+
+Arguments:
+  flow                  Specific Maestro flow file(s) or directory(ies) to run.
+                        Passed straight to \`maestro test\`. Shell glob
+                        expansion works (e.g. .maestro/flows/*.yaml). When
+                        omitted, the configured flowsDir is used.
 
 Options:
   -c, --config <path>   Path to config file (default: auto-discover
@@ -23,11 +29,21 @@ Options:
   -h, --help            Show this help.
   -v, --version         Show version.
 
+Examples:
+  # Full suite, interactive device picker
+  maestro-parallel
+
+  # Run two specific flows on the picked devices
+  maestro-parallel .maestro/flows/login_flow.yaml .maestro/flows/checkout.yaml
+
+  # Glob expansion via the shell
+  maestro-parallel .maestro/flows/login_*.yaml
+
 Configuration:
-  See https://github.com/kaln/maestro-parallel#configuration
+  See https://github.com/TomKalina/maestro-parallel#configuration
 `;
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 async function main(): Promise<void> {
   const args = parseArgs(Deno.args, {
@@ -66,6 +82,7 @@ async function main(): Promise<void> {
     cwd,
     skipBuild: args['skip-build'],
     skipClear: args['skip-clear'],
+    flows: positional,
   });
   Deno.exit(code);
 }

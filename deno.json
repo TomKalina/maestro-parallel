@@ -1,6 +1,6 @@
 {
   "name": "@kaln/maestro-parallel",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Parallel Maestro test runner with interactive device picker, automatic build/install, and JUnit aggregation. Runs Maestro flows on multiple Android and iOS devices simultaneously.",
   "license": "Apache-2.0",
   "exports": {

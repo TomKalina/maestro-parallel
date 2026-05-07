@@ -6,7 +6,12 @@ import { discoverDevices } from './devices.ts';
 import { mergeJunit, summarize } from './junit.ts';
 import { pickDevices, readLastSelection, writeLastSelection } from './picker.ts';
 import { makeShardConfig, runDevice, runShardGroup } from './runner.ts';
-import { buildAndInstall, clearAppState, wakeAndroidDevices } from './setup.ts';
+import {
+  buildAndInstall,
+  clearAppState,
+  restoreAndroidDevices,
+  wakeAndroidDevices,
+} from './setup.ts';
 import type { Device, RunResult } from './types.ts';
 import { C, fatal, log, PALETTE } from './ui.ts';
 
@@ -18,6 +23,14 @@ export interface RunOptions {
    * when wrapping the library in a custom command.
    */
   devices?: Device[];
+  /**
+   * Specific Maestro flow files (or directories) to run. When provided and
+   * non-empty, these are passed to `maestro test` instead of `config.flowsDir`,
+   * letting callers run a hand-picked subset of the suite. Paths are passed
+   * to Maestro as-is (relative to cwd or absolute). When empty/undefined,
+   * the full `flowsDir` is used.
+   */
+  flows?: string[];
   /**
    * Skip build & install (assume the app is already installed). Default false.
    */
@@ -104,57 +117,66 @@ export async function runMaestroParallel(
   const androidDevices = chosen.filter((d) => d.platform === 'android');
   const iosDevices = chosen.filter((d) => d.platform === 'ios');
   const results: RunResult[] = [];
+  const flows = options.flows;
 
-  // Android: parallel processes. Maestro 2.5+ fixed the dadb host port race.
-  const androidPromise = Promise.all(
-    androidDevices.map((d) =>
-      runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved).then((r) => {
-        results.push(r);
-      })
-    ),
-  );
-
-  // iOS: sequential by default — XCTestService races on per-sim ports when
-  // multiple iOS simulators are driven concurrently. Opt into shard-all
-  // when the user knows their setup tolerates it.
-  const iosPromise = (async () => {
-    if (iosDevices.length === 0) return;
-    if (resolved.iosShardAll) {
-      const shardConfig = await makeShardConfig(cwd, resolved.maestroConfigPath);
-      const color = colorOf(iosDevices[0]!);
-      const group = await runShardGroup(
-        'ios',
-        iosDevices,
-        color,
-        prefixWidth,
-        cwd,
-        outBase,
-        shardConfig,
-        resolved,
-      );
-      // Translate group result into per-device results so summary works.
-      for (const d of iosDevices) {
-        results.push({ device: d, exitCode: group.exitCode, outDir: group.outDir });
-      }
-      return;
-    }
-    if (resolved.iosSequential) {
-      for (const d of iosDevices) {
-        const r = await runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved);
-        results.push(r);
-      }
-      return;
-    }
-    await Promise.all(
-      iosDevices.map((d) =>
-        runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved).then((r) => {
+  try {
+    // Android: parallel processes. Maestro 2.5+ fixed the dadb host port race.
+    const androidPromise = Promise.all(
+      androidDevices.map((d) =>
+        runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved, flows).then((r) => {
           results.push(r);
         })
       ),
     );
-  })();
 
-  await Promise.all([androidPromise, iosPromise]);
+    // iOS: sequential by default — XCTestService races on per-sim ports when
+    // multiple iOS simulators are driven concurrently. Opt into shard-all
+    // when the user knows their setup tolerates it.
+    const iosPromise = (async () => {
+      if (iosDevices.length === 0) return;
+      if (resolved.iosShardAll) {
+        const shardConfig = await makeShardConfig(cwd, resolved.maestroConfigPath);
+        const color = colorOf(iosDevices[0]!);
+        const group = await runShardGroup(
+          'ios',
+          iosDevices,
+          color,
+          prefixWidth,
+          cwd,
+          outBase,
+          shardConfig,
+          resolved,
+          flows,
+        );
+        // Translate group result into per-device results so summary works.
+        for (const d of iosDevices) {
+          results.push({ device: d, exitCode: group.exitCode, outDir: group.outDir });
+        }
+        return;
+      }
+      if (resolved.iosSequential) {
+        for (const d of iosDevices) {
+          const r = await runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved, flows);
+          results.push(r);
+        }
+        return;
+      }
+      await Promise.all(
+        iosDevices.map((d) =>
+          runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved, flows).then((r) => {
+            results.push(r);
+          })
+        ),
+      );
+    })();
+
+    await Promise.all([androidPromise, iosPromise]);
+  } finally {
+    // Always restore Android display defaults even if a test crashed the
+    // runner mid-flight. Otherwise the device stays on stayon-while-charging
+    // with adaptive sleep disabled and a 30 min screen timeout.
+    await restoreAndroidDevices(chosen);
+  }
 
   const merged = await mergeJunit(results, outBase);
   await summarize(results, outBase, merged);
