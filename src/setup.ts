@@ -3,12 +3,12 @@
 // rest. The build step is delegated to the user's config — we do not know
 // whether they use Expo, bare RN, native Xcode/Gradle, etc.
 
-import type { ResolvedConfig } from './config.ts';
-import { devicePrefix } from './devices.ts';
-import { run, spawnPrefixed } from './exec.ts';
-import { setupIosSim } from './setupIosSim.ts';
-import type { Device, Platform } from './types.ts';
-import { C, log } from './ui.ts';
+import type { ResolvedConfig } from './config.js';
+import { devicePrefix } from './devices.js';
+import { run, spawnPrefixed } from './exec.js';
+import { setupIosSim } from './setupIosSim.js';
+import type { Device, Platform } from './types.js';
+import { C, log } from './ui.js';
 
 // Wake every Android device and keep its screen on so Maestro can interact
 // with the app. A locked screen leaves NotificationShade focused above the
@@ -92,9 +92,7 @@ export async function buildAndInstall(
     const platform = platformOf(groupKey);
     const hooks = config.build?.[platform];
     if (!hooks) {
-      log(
-        `${C.yellow}skip group ${groupKey}: no config.build.${platform} configured${C.reset}`,
-      );
+      log(`${C.yellow}skip group ${groupKey}: no config.build.${platform} configured${C.reset}`);
       continue;
     }
 
@@ -144,8 +142,6 @@ export async function buildAndInstall(
       } else if (groupKey === 'ios-sim') {
         code = await defaultInstallIosSim(d, artifact.path, p);
       } else {
-        // ios-usb has no shell-installable artifact reuse path: fall back
-        // to a per-device build through the user's hook.
         log(
           `${p}${C.yellow}physical iOS reuse-install not supported; using per-device build hook${C.reset}`,
         );
@@ -159,7 +155,7 @@ export async function buildAndInstall(
       }
       if (code !== 0) {
         log(`${p}${C.red}install failed (exit ${code})${C.reset}`);
-        Deno.exit(code);
+        process.exit(code);
       }
       log(`${p}${C.green}installed${C.reset}`);
     });

@@ -1,13 +1,14 @@
-// Auto-discover and load `maestroparallel.config.{ts,mts,js,mjs,json}`
-// from the project root or any explicit path passed via `--config`.
+// Auto-discover and load `maestroparallel.config.{ts,js,...}` from the
+// project root or any explicit path passed via `--config`. TS configs are
+// loaded via `jiti` so users don't need a build step for their config.
 
-import { isAbsolute, join, resolve, toFileUrl } from '@std/path';
-import { CONFIG_FILENAMES, type MaestroParallelConfig } from './config.ts';
+import { stat } from 'node:fs/promises';
+import { isAbsolute, join, resolve } from 'node:path';
+import { CONFIG_FILENAMES, type MaestroParallelConfig } from './config.js';
 
 async function fileExists(path: string): Promise<boolean> {
   try {
-    const s = await Deno.stat(path);
-    return s.isFile;
+    return (await stat(path)).isFile();
   } catch {
     return false;
   }
@@ -31,17 +32,20 @@ export async function loadConfig(
   if (!path) return null;
 
   if (path.endsWith('.json')) {
-    const txt = await Deno.readTextFile(path);
+    const txt = await (await import('node:fs/promises')).readFile(path, 'utf8');
     return { path, config: JSON.parse(txt) as MaestroParallelConfig };
   }
 
-  // Deno can natively import .ts/.mts/.js/.mjs via dynamic import.
-  // toFileUrl is required on Windows to make the path a valid URL.
-  const url = toFileUrl(path).href;
-  const mod = await import(url) as
-    & { default?: MaestroParallelConfig }
-    & { config?: MaestroParallelConfig };
-  const config = mod.default ?? mod.config;
+  let mod: Record<string, unknown>;
+  if (path.endsWith('.ts') || path.endsWith('.mts')) {
+    // jiti transpiles TS for Node without a build step.
+    const { createJiti } = await import('jiti');
+    const jiti = createJiti(import.meta.url, { interopDefault: true });
+    mod = await jiti.import(path) as Record<string, unknown>;
+  } else {
+    mod = await import(path) as Record<string, unknown>;
+  }
+  const config = (mod.default ?? mod.config) as MaestroParallelConfig | undefined;
   if (!config) {
     throw new Error(
       `${path}: config file must export a default config (export default defineConfig({...}))`,

@@ -1,69 +1,75 @@
 # maestro-parallel
 
-[![JSR](https://jsr.io/badges/@kaln/maestro-parallel)](https://jsr.io/@kaln/maestro-parallel)
+[![npm](https://img.shields.io/npm/v/maestro-parallel.svg)](https://www.npmjs.com/package/maestro-parallel)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-Run [Maestro](https://maestro.mobile.dev/) flows on multiple Android and iOS
-devices in parallel. Interactive picker, build & install once per platform,
-merged JUnit report.
+Run [Maestro](https://maestro.mobile.dev/) E2E flows on every connected
+Android and iOS device at once. Zero config required.
 
-## Quickstart
+## Use it
 
 ```bash
-# 1. Install
-deno install -A -g -n maestro-parallel jsr:@kaln/maestro-parallel/cli
+# Install
+npm install --save-dev maestro-parallel
 
-# 2. In your project (must contain a .maestro/ flows directory)
-cat > maestroparallel.config.ts <<'EOF'
-import { defineConfig } from 'jsr:@kaln/maestro-parallel/config';
-export default defineConfig({ bundleId: 'com.your.app' });
-EOF
-
-# 3. Plug in devices / boot simulators, then:
-maestro-parallel --skip-build
+# Run (must have a .maestro/ folder with flows)
+npx maestro-parallel
 ```
 
-A checklist appears, space toggles, enter runs.
+That's it. The CLI discovers your devices, asks which to use, runs your
+flows in parallel, prints pass/fail.
 
-## With build & install
+If only one device is connected, it skips the picker and just runs.
 
-Drop the `--skip-build` and add build hooks to the config — see
-[`examples/expo.config.ts`](./examples/expo.config.ts) for an Expo / React
-Native setup. Copy-paste, change `bundleId`, done.
+### Or globally
 
-## CLI
-
-```
-maestro-parallel              # pick devices, run flows
-maestro-parallel --skip-build # app already installed
-maestro-parallel --skip-clear # don't wipe app data
-maestro-parallel setup-ios-sim # disable AutoFill on every booted sim
-maestro-parallel --help
+```bash
+npm install -g maestro-parallel
+maestro-parallel
 ```
 
-## Library
+### Common variants
+
+```bash
+maestro-parallel                          # auto: .maestro/ folder
+maestro-parallel ./e2e/login.yaml         # specific flow
+maestro-parallel --all                    # every device, no picker
+maestro-parallel setup-ios-sim            # disable iOS AutoFill prompt
+```
+
+## Add a config (only when you need it)
+
+A config is **optional**. Add one only if you want maestro-parallel to also
+build & install your app, clear app data between runs, or pass env vars.
 
 ```ts
-import { runMaestroParallel } from 'jsr:@kaln/maestro-parallel';
-const code = await runMaestroParallel({ bundleId: 'com.your.app' });
-Deno.exit(code);
+// maestroparallel.config.ts
+import { defineConfig } from 'maestro-parallel/config';
+
+export default defineConfig({
+  bundleId: 'com.your.app',          // enables app-data clearing
+  maestroEnv: { API_URL: '...' },    // forwarded to maestro -e
+  // build: { android: { ... }, ios: { ... } } — see examples/
+});
 ```
 
-## Configuration reference
+See [`examples/expo.config.ts`](./examples/expo.config.ts) for an
+Expo / React Native build setup. Full schema in
+[`src/config.ts`](./src/config.ts).
 
-Full schema with JSDoc: [`src/config.ts`](./src/config.ts).
-Every option is optional except `bundleId`. Common ones:
+## Library API
 
-- `flowsDir` — where your Maestro flows live (default `.maestro`)
-- `maestroEnv` — extra `-e KEY=VALUE` flags for Maestro
-- `build.{android,ios}` — build & install hooks (omit to skip)
-- `iosSequential` / `iosShardAll` — iOS execution mode
+```ts
+import { runMaestroParallel } from 'maestro-parallel';
+const code = await runMaestroParallel({ bundleId: 'com.your.app' });
+process.exit(code);
+```
 
 ## Requirements
 
-- [Deno](https://deno.com/) ≥ 2.0
+- Node ≥ 18.17
 - [Maestro CLI](https://maestro.mobile.dev/getting-started/installing-maestro) on `PATH`
-- `adb` (Android) and/or `xcrun` (iOS, with Xcode)
+- `adb` (for Android), `xcrun` (for iOS, ships with Xcode)
 
 ## License
 

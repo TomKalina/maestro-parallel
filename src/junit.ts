@@ -1,15 +1,16 @@
 // Merge per-device JUnit reports into a single rolled-up document and
 // print a per-device summary table at the end.
 
-import { join } from '@std/path';
-import type { JunitCounts, RunResult } from './types.ts';
-import { C, log } from './ui.ts';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import type { JunitCounts, RunResult } from './types.js';
+import { C, log } from './ui.js';
 
 export async function mergeJunit(results: RunResult[], outBase: string): Promise<string | null> {
   const xmls: string[] = [];
   for (const r of results) {
     try {
-      xmls.push(await Deno.readTextFile(join(r.outDir, 'report.xml')));
+      xmls.push(await readFile(join(r.outDir, 'report.xml'), 'utf8'));
     } catch { /* ignore */ }
   }
   if (xmls.length === 0) return null;
@@ -21,7 +22,7 @@ export async function mergeJunit(results: RunResult[], outBase: string): Promise
       .trim()
   ).join('\n');
   const path = join(outBase, 'report.xml');
-  await Deno.writeTextFile(
+  await writeFile(
     path,
     `<?xml version="1.0" encoding="UTF-8"?>\n<testsuites name="maestro-parallel">\n${inner}\n</testsuites>\n`,
   );
@@ -31,8 +32,6 @@ export async function mergeJunit(results: RunResult[], outBase: string): Promise
 export function parseCounts(xml: string): JunitCounts {
   const sum = (re: RegExp): number =>
     [...xml.matchAll(re)].reduce((s, m) => s + Number(m[1] ?? 0), 0);
-  // Use only top-level <testsuite ...> entries to avoid double counting if
-  // the testsuites wrapper has totals too.
   return {
     tests: sum(/<testsuite\b[^>]*\btests="(\d+)"/g),
     failures: sum(/<testsuite\b[^>]*\bfailures="(\d+)"/g),
@@ -51,7 +50,7 @@ export async function summarize(
   for (const r of results) {
     let counts: JunitCounts | null = null;
     try {
-      counts = parseCounts(await Deno.readTextFile(join(r.outDir, 'report.xml')));
+      counts = parseCounts(await readFile(join(r.outDir, 'report.xml'), 'utf8'));
     } catch { /* ignore */ }
     const ok = r.exitCode === 0;
     const tally = counts

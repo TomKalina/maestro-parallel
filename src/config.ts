@@ -1,10 +1,11 @@
 // Public configuration API for projects integrating maestro-parallel.
 //
-// Projects ship a `maestroparallel.config.ts` (or `.json`) at the repo root.
-// The CLI auto-loads it. Library consumers may also import this module
-// directly and pass a config object to `runMaestroParallel()`.
+// Projects ship a `maestroparallel.config.{ts,js,mjs,cjs,json}` at the repo
+// root (or another path passed via `--config`). The CLI auto-loads it.
+// Library consumers may also import this module directly and pass a config
+// object to `runMaestroParallel()`.
 
-import type { Device, Platform } from './types.ts';
+import type { Device, Platform } from './types.js';
 
 export interface BuildContext {
   /** First device picked in this platform group; the build is targeted at it. */
@@ -40,10 +41,14 @@ export interface PlatformBuildHooks {
 }
 
 export interface MaestroParallelConfig {
-  /** App bundle identifier. Required: used to clear app data between runs. */
-  bundleId: string;
+  /**
+   * App bundle identifier. Optional. When set, the runner clears app data
+   * between runs so each flow starts from a clean state. Without it, the
+   * clear step is skipped automatically.
+   */
+  bundleId?: string;
 
-  /** Maestro flows directory, relative to cwd. Default `.maestro`. */
+  /** Maestro flows directory or single flow file, relative to cwd. Default `.maestro`. */
   flowsDir?: string;
 
   /** Output base directory (relative to cwd). Default `.maestro/output`. */
@@ -64,7 +69,7 @@ export interface MaestroParallelConfig {
 
   /**
    * Extra environment variables forwarded to Maestro via `-e KEY=VALUE`.
-   * Useful for shop URLs, account IDs, feature flags. The user's own
+   * Useful for backend URLs, account IDs, feature flags. The user's own
    * environment overrides these.
    */
   maestroEnv?: Record<string, string>;
@@ -106,16 +111,13 @@ export function defineConfig(config: MaestroParallelConfig): MaestroParallelConf
 }
 
 export type ResolvedConfig =
-  & Required<
-    Omit<MaestroParallelConfig, 'build' | 'hooks' | 'maestroEnv'>
-  >
-  & Pick<MaestroParallelConfig, 'build' | 'hooks'>
+  & Required<Omit<MaestroParallelConfig, 'build' | 'hooks' | 'maestroEnv' | 'bundleId'>>
+  & Pick<MaestroParallelConfig, 'build' | 'hooks' | 'bundleId'>
   & {
     maestroEnv: Record<string, string>;
   };
 
 export function resolveConfig(c: MaestroParallelConfig): ResolvedConfig {
-  if (!c.bundleId) throw new Error('maestro-parallel: config.bundleId is required');
   return {
     bundleId: c.bundleId,
     flowsDir: c.flowsDir ?? '.maestro',
@@ -135,6 +137,7 @@ export const CONFIG_FILENAMES = [
   'maestroparallel.config.mts',
   'maestroparallel.config.js',
   'maestroparallel.config.mjs',
+  'maestroparallel.config.cjs',
   'maestroparallel.config.json',
 ];
 

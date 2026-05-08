@@ -2,12 +2,14 @@
 // One process per device is the safe default; iOS shard-all is opt-in
 // because the host XCTestDriver serialises gestures across simulators.
 
-import { join } from '@std/path';
-import type { ResolvedConfig } from './config.ts';
-import { devicePrefix } from './devices.ts';
-import { spawnPrefixedTee } from './exec.ts';
-import type { Device, GroupRunResult, Platform, RunResult } from './types.ts';
-import { C, log } from './ui.ts';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { ResolvedConfig } from './config.js';
+import { devicePrefix } from './devices.js';
+import { spawnPrefixedTee } from './exec.js';
+import type { Device, GroupRunResult, Platform, RunResult } from './types.js';
+import { C, log } from './ui.js';
 
 function deviceSlug(d: Device): string {
   return `${d.platform}-${d.name.replace(/[^A-Za-z0-9]+/g, '_')}-${d.id.slice(0, 8)}`;
@@ -16,7 +18,7 @@ function deviceSlug(d: Device): string {
 function envFlags(extraEnv: Record<string, string>): string[] {
   const out: string[] = [];
   for (const [k, v] of Object.entries(extraEnv)) {
-    if (Deno.env.get(k) !== undefined) continue;
+    if (process.env[k] !== undefined) continue;
     out.push('-e', `${k}=${v}`);
   }
   return out;
@@ -29,7 +31,7 @@ export async function makeShardConfig(cwd: string, configPath: string): Promise<
   const src = join(cwd, configPath);
   let txt: string;
   try {
-    txt = await Deno.readTextFile(src);
+    txt = await readFile(src, 'utf8');
   } catch {
     return null;
   }
@@ -49,9 +51,9 @@ export async function makeShardConfig(cwd: string, configPath: string): Promise<
     }
     out.push(line);
   }
-  const tmpDir = await Deno.makeTempDir({ prefix: 'maestro-parallel-' });
+  const tmpDir = await mkdtemp(join(tmpdir(), 'maestro-parallel-'));
   const tmp = join(tmpDir, 'config.yaml');
-  await Deno.writeTextFile(tmp, out.join('\n'));
+  await writeFile(tmp, out.join('\n'));
   return tmp;
 }
 
@@ -67,7 +69,7 @@ export async function runDevice(
   config: ResolvedConfig,
 ): Promise<RunResult> {
   const outDir = join(outBase, deviceSlug(d));
-  await Deno.mkdir(outDir, { recursive: true });
+  await mkdir(outDir, { recursive: true });
 
   const args = [
     'test',
@@ -120,7 +122,7 @@ export async function runShardGroup(
   config: ResolvedConfig,
 ): Promise<GroupRunResult> {
   const outDir = join(outBase, `${platform}-shard`);
-  await Deno.mkdir(outDir, { recursive: true });
+  await mkdir(outDir, { recursive: true });
   const ids = devices.map((d) => d.id);
 
   const args: string[] = [

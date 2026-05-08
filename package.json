@@ -1,0 +1,69 @@
+{
+  "name": "maestro-parallel",
+  "version": "0.1.0",
+  "description": "Run Maestro E2E flows in parallel on multiple Android and iOS devices. Interactive picker, automatic build/install, JUnit aggregation.",
+  "keywords": [
+    "maestro",
+    "e2e",
+    "testing",
+    "react-native",
+    "expo",
+    "android",
+    "ios",
+    "parallel",
+    "mobile",
+    "automation",
+    "qa"
+  ],
+  "license": "Apache-2.0",
+  "author": "Tomas Kalina",
+  "homepage": "https://github.com/TomKalina/maestro-parallel#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TomKalina/maestro-parallel.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TomKalina/maestro-parallel/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js"
+    }
+  },
+  "bin": {
+    "maestro-parallel": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
+    "release": "npm run build && npm publish --access public"
+  },
+  "dependencies": {
+    "cosmiconfig": "^9.0.0",
+    "jiti": "^2.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0"
+  }
+}

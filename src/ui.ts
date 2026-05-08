@@ -29,5 +29,5 @@ export const log = (msg: string): void => console.error(msg);
 
 export const fatal = (msg: string): never => {
   console.error(`${C.red}error:${C.reset} ${msg}`);
-  Deno.exit(1);
+  process.exit(1);
 };

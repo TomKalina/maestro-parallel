@@ -2,9 +2,12 @@
 // + connected USB devices). Each helper returns [] when its CLI is missing,
 // so projects on Linux without xcrun still see Android devices.
 
-import { has, run } from './exec.ts';
-import type { Device, DeviceKind } from './types.ts';
-import { C } from './ui.ts';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { has, run } from './exec.js';
+import type { Device, DeviceKind } from './types.js';
+import { C } from './ui.js';
 
 async function listAndroid(): Promise<Device[]> {
   if (!(await has('adb'))) return [];
@@ -78,11 +81,12 @@ interface DevicectlOutput {
 
 async function listIosPhysical(): Promise<Device[]> {
   if (!(await has('xcrun'))) return [];
-  const tmp = await Deno.makeTempFile({ suffix: '.json' });
+  const dir = await mkdtemp(join(tmpdir(), 'maestro-parallel-'));
+  const tmpJson = join(dir, 'devices.json');
   try {
-    const r = await run('xcrun', ['devicectl', 'list', 'devices', '--json-output', tmp]);
+    const r = await run('xcrun', ['devicectl', 'list', 'devices', '--json-output', tmpJson]);
     if (r.code !== 0) return [];
-    const parsed = JSON.parse(await Deno.readTextFile(tmp)) as DevicectlOutput;
+    const parsed = JSON.parse(await readFile(tmpJson, 'utf8')) as DevicectlOutput;
     const out: Device[] = [];
     for (const d of parsed.result?.devices ?? []) {
       if (d.hardwareProperties?.platform && d.hardwareProperties.platform !== 'iOS') continue;
@@ -104,9 +108,7 @@ async function listIosPhysical(): Promise<Device[]> {
   } catch {
     return [];
   } finally {
-    try {
-      await Deno.remove(tmp);
-    } catch { /* ignore */ }
+    await rm(dir, { recursive: true, force: true });
   }
 }
 

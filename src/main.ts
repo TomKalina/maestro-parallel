@@ -1,23 +1,29 @@
 // Top-level orchestration. Used by both the CLI and library consumers.
 
-import { join } from '@std/path';
-import { type MaestroParallelConfig, resolveConfig } from './config.ts';
-import { discoverDevices } from './devices.ts';
-import { mergeJunit, summarize } from './junit.ts';
-import { pickDevices, readLastSelection, writeLastSelection } from './picker.ts';
-import { makeShardConfig, runDevice, runShardGroup } from './runner.ts';
-import { buildAndInstall, clearAppState, wakeAndroidDevices } from './setup.ts';
-import type { Device, RunResult } from './types.ts';
-import { C, fatal, log, PALETTE } from './ui.ts';
+import { mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import { type MaestroParallelConfig, resolveConfig } from './config.js';
+import { discoverDevices } from './devices.js';
+import { mergeJunit, summarize } from './junit.js';
+import { pickDevices, readLastSelection, writeLastSelection } from './picker.js';
+import { makeShardConfig, runDevice, runShardGroup } from './runner.js';
+import { buildAndInstall, clearAppState, wakeAndroidDevices } from './setup.js';
+import type { Device, RunResult } from './types.js';
+import { C, fatal, log, PALETTE } from './ui.js';
 
 export interface RunOptions {
-  /** Project root. Default `Deno.cwd()`. */
+  /** Project root. Default `process.cwd()`. */
   cwd?: string;
   /**
    * Pre-selected devices: skips the interactive picker. Useful for CI or
    * when wrapping the library in a custom command.
    */
   devices?: Device[];
+  /**
+   * Skip the interactive picker and use every discovered device. Default false.
+   * The picker is also auto-skipped when only one device is available.
+   */
+  allDevices?: boolean;
   /**
    * Skip build & install (assume the app is already installed). Default false.
    */
@@ -28,16 +34,17 @@ export interface RunOptions {
 
 async function pruneOldRuns(cwd: string, outputDir: string, keep: number): Promise<void> {
   try {
+    const dirPath = join(cwd, outputDir);
     const entries: { name: string; mtime: number }[] = [];
-    for await (const e of Deno.readDir(join(cwd, outputDir))) {
-      if (e.isDirectory && e.name.startsWith('parallel-')) {
-        const stat = await Deno.stat(join(cwd, outputDir, e.name));
-        entries.push({ name: e.name, mtime: stat.mtime?.getTime() ?? 0 });
+    for (const e of await readdir(dirPath, { withFileTypes: true })) {
+      if (e.isDirectory() && e.name.startsWith('parallel-')) {
+        const s = await stat(join(dirPath, e.name));
+        entries.push({ name: e.name, mtime: s.mtime.getTime() });
       }
     }
     entries.sort((a, b) => b.mtime - a.mtime);
     for (const old of entries.slice(keep)) {
-      await Deno.remove(join(cwd, outputDir, old.name), { recursive: true });
+      await rm(join(dirPath, old.name), { recursive: true, force: true });
     }
   } catch { /* ignore */ }
 }
@@ -52,10 +59,11 @@ export async function runMaestroParallel(
   options: RunOptions = {},
 ): Promise<number> {
   const resolved = resolveConfig(config);
-  const cwd = options.cwd ?? Deno.cwd();
-  Deno.chdir(cwd);
+  const cwd = options.cwd ?? process.cwd();
+  process.chdir(cwd);
 
   log(`${C.dim}cwd:${C.reset} ${cwd}`);
+  log(`${C.dim}flows:${C.reset} ${resolved.flowsDir}`);
 
   let chosen: Device[];
   if (options.devices && options.devices.length > 0) {
@@ -66,17 +74,26 @@ export async function runMaestroParallel(
     if (devs.length === 0) {
       fatal('No devices found. Connect Android via USB (adb devices) or boot an iOS simulator.');
     }
-    const last = await readLastSelection(cwd);
-    chosen = await pickDevices(devs, last);
-    if (chosen.length === 0) fatal('No device selected.');
-    await writeLastSelection(cwd, chosen.map((d) => d.id));
+    if (options.allDevices) {
+      chosen = devs;
+      log(`${C.dim}using all ${devs.length} discovered device(s)${C.reset}`);
+    } else if (devs.length === 1) {
+      // Skip the picker when there's nothing to choose from.
+      chosen = devs;
+      log(`${C.dim}only 1 device found, running on it directly${C.reset}`);
+    } else {
+      const last = await readLastSelection(cwd);
+      chosen = await pickDevices(devs, last);
+      if (chosen.length === 0) fatal('No device selected.');
+      await writeLastSelection(cwd, chosen.map((d) => d.id));
+    }
   }
 
   await pruneOldRuns(cwd, resolved.outputDir, resolved.keepRuns);
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const outBase = join(resolved.outputDir, `parallel-${ts}`);
-  await Deno.mkdir(join(cwd, outBase), { recursive: true });
+  await mkdir(join(cwd, outBase), { recursive: true });
 
   const prefixWidth = Math.max(
     ...chosen.map((d) => (d.platform === 'android' ? 'and' : 'ios').length + 1 + d.name.length),
@@ -87,13 +104,14 @@ export async function runMaestroParallel(
   );
   const colorOf = (d: Device): string => colorByDevice.get(d.id) ?? PALETTE[0]!;
 
-  if (!options.skipBuild) {
+  if (!options.skipBuild && resolved.build) {
     await buildAndInstall(chosen, cwd, resolved, colorOf, prefixWidth);
   }
 
   await wakeAndroidDevices(chosen);
 
-  if (!options.skipClear) {
+  // bundleId is required for the clear step; if absent we silently skip it.
+  if (!options.skipClear && resolved.bundleId) {
     await clearAppState(chosen, resolved.bundleId);
   }
 
@@ -132,7 +150,6 @@ export async function runMaestroParallel(
         shardConfig,
         resolved,
       );
-      // Translate group result into per-device results so summary works.
       for (const d of iosDevices) {
         results.push({ device: d, exitCode: group.exitCode, outDir: group.outDir });
       }

@@ -6,8 +6,8 @@
 // SpringBoard above the app surface and cannot be dismissed from inside a
 // flow.
 
-import { run } from './exec.ts';
-import { C, log } from './ui.ts';
+import { run } from './exec.js';
+import { C, log } from './ui.js';
 
 export async function setupIosSim(udid: string): Promise<void> {
   // Different iOS versions read the AutoFill toggle from different defaults
