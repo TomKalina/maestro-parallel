@@ -4,8 +4,77 @@
 [![npm](https://img.shields.io/npm/v/maestro-parallel.svg)](https://www.npmjs.com/package/maestro-parallel)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-Run [Maestro](https://maestro.mobile.dev/) E2E flows on every connected Android and iOS device at
-once. Zero config required.
+Run [Maestro](https://maestro.mobile.dev/) E2E flows on every connected Android and iOS device in
+parallel. Zero config in an Expo / React Native project — release build, install, run, summarise.
+
+## What it does
+
+**Device orchestration**
+
+- Discovers every plugged-in Android phone, booted iOS simulator, and tethered iPhone in a single
+  pass (`adb devices` + `xcrun simctl list` + `xcrun devicectl`).
+- Interactive multi-select picker with last-selection memory (stored per-user, not in the project).
+- One-key opt-outs: `--all`, `--skip-build`, `--skip-clear`.
+- Picker is auto-skipped when only one device is present.
+
+**Release build & install**
+
+- Asks once at run start: "Build a release artifact now? [Y/n]". `Y` (default) builds via your
+  configured hook; `n` runs against the build already installed on each device.
+- For Expo projects, auto-injects a default hook that runs
+  `pnpm | yarn | npm exec expo run:ios --configuration Release` /
+  `expo run:android --variant release` (whichever package manager you use) — the canonical local
+  release command. No EAS detour, no Metro at runtime.
+- Builds once per platform group, then reuse-installs on every other device in the group:
+  `adb install -r` for Android, `xcrun simctl install` for iOS sims. Physical iOS falls back to a
+  per-device build (no programmatic install path).
+- Custom build hooks (per-platform `buildAndInstallFirst` / `installExisting`) for non-Expo projects
+  — see [`examples/expo.config.ts`](./examples/expo.config.ts) and
+  [`examples/eas-local.config.ts`](./examples/eas-local.config.ts).
+- **No dev-client / Metro / preflight workarounds.** Release builds are the only supported path
+  because dev builds are structurally flaky for E2E (dev-launcher picker, dev-menu onboarding
+  overlay, Fast Refresh races, `adb reverse` decay).
+
+**Per-run device prep**
+
+- Android: wakes the screen, swipes up to dismiss swipe-locks, enables `svc power stayon true`,
+  warns loudly when a device is still PIN-locked.
+- iOS simulators (every selected sim, automatic): disables AutoFill in both
+  `com.apple.preferences.password.RemoteUI.SimulatorBundleSettings` and
+  `com.apple.AutoFillFramework`, resets the keychain, sets `SBIdleTimerDisabled` so the sim screen
+  doesn't blank mid-test.
+- Physical iOS: brings up the CoreDevice tunnel via long-lived
+  `xcrun devicectl device info
+  details` keepalive processes (the tunnel decays seconds after the
+  command exits otherwise) and prints a one-line reminder to disable Auto-Lock manually.
+- `bundleId` triggers an automatic app-data clear between runs (`adb shell pm clear` /
+  `simctl privacy reset` + `rm -rf <data-container>`).
+- Optional `hooks.preTest(devices)` for project-specific tweaks before flows run.
+
+**Maestro execution**
+
+- One `maestro test` process per device by default — Maestro 2.5+ fixed the Android dadb host port
+  race so this is safe and gives you the cleanest per-device JUnit. Optional `iosShardAll: true`
+  collapses iOS into a single `--shard-all=N` process, which trades per-device logs for staying
+  inside the XCTestDriver gesture lock.
+- Process-start stagger (default 2000 ms cumulative) works around a Maestro 2.5.x bug where two
+  processes sharing the same wall-clock second collide on the per-second session log dir.
+- Apple Team ID auto-piped through (`--apple-team-id`) for every physical iPhone in the run.
+- Maestro env vars (`maestroEnv: { API_URL: '…' }`) forwarded as `-e KEY=VALUE`. Your own
+  environment overrides the config.
+- JUnit XML reports merged across all devices into a single `merged.xml`; pass/fail summary printed
+  per device at the end.
+- Per-run output goes to `<outputDir>/parallel-<timestamp>/<device-slug>/` with `run.log`,
+  `report.xml`, and a Maestro debug bundle. Old runs are pruned to `keepRuns` (default 3).
+
+**CLI ergonomics**
+
+- Zero config: drop into an Expo project, run `maestro-parallel`, answer one Y/N prompt.
+- Coloured per-device prefix on every log line so parallel output stays scannable
+  (`[ios:iPhone 17 ]`, `[and:Pixel 8]`).
+- Helper subcommand: `maestro-parallel setup-ios-sim` runs the AutoFill / keychain / stay-awake
+  setup against every currently-booted simulator without doing a full run — useful right after
+  spinning up a fresh sim.
 
 ## Use it
 
@@ -237,6 +306,67 @@ deno task run            # run CLI locally
 deno task fmt            # format
 deno task lint           # lint
 ```
+
+## Roadmap / ideas
+
+Not promises — possible directions. PRs welcome.
+
+**Build & artifacts**
+
+- **EAS local build profile auto-detection**: when `eas.json` defines an `e2e-test` profile, offer
+  `eas build --profile <p> --local` as an alternative to `expo run:*`. Today the user has to copy
+  [`examples/eas-local.config.ts`](./examples/eas-local.config.ts).
+- **Prebuilt artifact mode**: `maestro-parallel --apk path.apk --app path.app` to skip the build
+  hook entirely and just install + run. Closes the CI gap where the build is a separate step.
+- **Incremental skip**: hash the JS bundle + native dirs; reuse the previous artifact when nothing
+  has changed. Several-minute saving on the second `maestro-parallel` run of the same day.
+- **Distributable smoke artifact**: optional `--upload <provider>` to push the built artifact to
+  Firebase App Distribution / TestFlight after a successful run.
+
+**Flow execution**
+
+- **Flow sharding by name pattern**: `--shard "auth/*"` to split flows across devices by glob, not
+  just `--shard-all`.
+- **Retry-flaky**: `--retry-failed 1` re-runs only failing flows once on the same device before
+  marking the run red.
+- **Dependency graph between flows**: `runFlow` chains aren't surfaced in JUnit; a topological
+  pre-pass would let us name them as test cases.
+- **Per-device flow filter**: `flowsForDevice(device)` config hook so an Android-only flow doesn't
+  fail discovery on iOS.
+
+**Devices & infra**
+
+- **Physical iOS reuse-install**: today the build hook is invoked per-device. With Apple's
+  CoreDevice install API (`xcrun devicectl device install app`) we could mirror the .ipa onto every
+  physical iPhone in the group.
+- **WiFi Android devices**: `adb connect <host>:<port>` discovery, so dropping a device on the team
+  Wi-Fi automatically joins the next run.
+- **Android emulator boot**: `--boot <avd-name>` spins up a cold emulator at the start of the run
+  and tears it down at the end.
+- **Cloud device pools**: optional adapter for BrowserStack / Sauce Labs (their Maestro support
+  exists). The picker would surface remote devices alongside local ones.
+
+**Observability**
+
+- **Live progress dashboard**: TUI showing each device's current step, time-since-start, and last
+  Maestro output line. Today you scroll up through interleaved logs.
+- **HTML report**: roll the per-device JUnit + Maestro debug bundles into a single browsable
+  `index.html` with screenshots / videos / step timing per flow.
+- **Slack / Discord webhook**: post the summary table after a run finishes. CI already does this,
+  but a local hook would catch ad-hoc runs.
+- **Flake tracker**: persist per-flow pass/fail history (sqlite in the per-user cache dir) and
+  surface the flakiest flows in the summary.
+
+**Developer experience**
+
+- **`maestro-parallel doctor`**: end-to-end pre-flight (maestro CLI version, adb auth, sim boot
+  state, Apple Team ID, Xcode license, EAS auth). Fails fast with actionable hints.
+- **Config validation at load time**: schema-check `maestroparallel.config.ts` and print the
+  effective config diff before the run. Today silent typos go unnoticed.
+- **Watch mode**: `maestro-parallel --watch path/to/flow.yaml` re-runs the flow when the file
+  changes — great for iterating on a single flow.
+- **Node distribution**: `dnt` build so `npx maestro-parallel` works without Deno. The shim layer
+  for `Deno.Command` / `Deno.stdin.setRaw` is the blocker.
 
 ## License
 

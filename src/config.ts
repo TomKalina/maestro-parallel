@@ -123,7 +123,8 @@ export interface MaestroParallelConfig {
    * timestamped to the second (`~/Library/Logs/maestro/YYYY-MM-DD_HHMMSS`),
    * so two processes that start in the same second collide. The first one
    * to finalize zips and removes the dir; the rest fail with
-   * `NoSuchFileException`. Default 1100 ms (> 1 s). Set to 0 to disable.
+   * `NoSuchFileException`. Default 2000 ms (> 1 s plus headroom). Set to
+   * 0 to disable.
    */
   processStartStaggerMs?: number;
 
@@ -171,6 +172,11 @@ export type ResolvedConfig =
   };
 
 export function resolveConfig(c: MaestroParallelConfig): ResolvedConfig {
+  if (c.iosSequential && c.iosShardAll) {
+    throw new Error(
+      "Invalid config: 'iosSequential' and 'iosShardAll' are mutually exclusive. shard-all already runs every sim through a single Maestro process; sequential makes no sense alongside it.",
+    );
+  }
   return {
     bundleId: c.bundleId,
     flowsDir: c.flowsDir ?? '.maestro',

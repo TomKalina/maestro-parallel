@@ -7,7 +7,6 @@ import type { BuildMode } from './buildMode.ts';
 import type { ResolvedConfig } from './config.ts';
 import { devicePrefix } from './devices.ts';
 import { run, spawnPrefixed } from './exec.ts';
-import { setupIosSim } from './setupIosSim.ts';
 import type { Device, Platform } from './types.ts';
 import { C, log } from './ui.ts';
 
@@ -55,9 +54,9 @@ export function warnIosPhysicalAutoLock(devices: Device[]): void {
   const physical = devices.filter((d) => d.platform === 'ios' && d.kind === 'usb');
   if (physical.length === 0) return;
   log(
-    `${C.yellow}poznámka: iOS fyzické zařízení (${
+    `${C.yellow}note: physical iOS (${
       physical.map((d) => d.name).join(', ')
-    }) — Auto-Lock nelze vypnout programaticky. Nastav: Nastavení → Displej a jas → Uzamknout displej po → Nikdy.${C.reset}`,
+    }) — Auto-Lock cannot be disabled programmatically. Set: Settings → Display & Brightness → Auto-Lock → Never.${C.reset}`,
   );
 }
 
@@ -145,8 +144,10 @@ export async function clearAppState(devices: Device[], bundleId: string): Promis
           await Deno.remove(dataPath, { recursive: true });
         } catch { /* not present or already gone */ }
       }
-      // Disable iOS keychain "Save Password?" prompt which otherwise blocks flows.
-      await setupIosSim(d.id);
+      // NOTE: setupIosSim is invoked by main.ts for every selected sim
+      // before this clear step runs, so we deliberately do NOT call it
+      // a second time here — that was a leftover from before the
+      // automatic pre-flight phase landed.
     }
   }));
   log(`${C.dim}cleared app state on ${devices.length} device(s)${C.reset}`);
@@ -262,8 +263,14 @@ export async function buildAndInstall(
         code = 0;
       }
       if (code !== 0) {
-        log(`${p}${C.red}install failed (exit ${code})${C.reset}`);
-        Deno.exit(code);
+        // Throw instead of `Deno.exit` — the main pipeline has not yet
+        // attached its signal-cleanup handler at this point, so killing
+        // the process here would skip iOS tunnel teardown and any
+        // simulator that has been mid-install. Let the error bubble to
+        // the top-level catch in cli.ts.
+        const msg = `install failed on ${d.name} (${d.id}) — exit ${code}`;
+        log(`${p}${C.red}${msg}${C.reset}`);
+        throw new Error(msg);
       }
       log(`${p}${C.green}installed${C.reset}`);
     });

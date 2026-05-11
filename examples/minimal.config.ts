@@ -2,7 +2,7 @@
 // the runner already works (just call `maestro-parallel` with no config),
 // but app data persists across runs.
 
-import { defineConfig } from '../index.js';
+import { defineConfig } from 'jsr:@kaln/maestro-parallel/config';
 
 export default defineConfig({
   bundleId: 'com.example.myapp',

@@ -99,13 +99,28 @@ export async function runMaestroParallel(
   // They invoke the project's native toolchain (Xcode / Gradle), bake
   // the JS bundle in, and install the artifact on the first device. The
   // runner reuse-installs the resulting .apk / .app on the rest.
-  if (!augmented.build?.android && !augmented.build?.ios) {
+  // Fill in defaults per platform — if the user already wired up one
+  // platform but not the other, only the missing one gets the auto-hook.
+  if (!augmented.build?.android || !augmented.build?.ios) {
     const expoDefaults = await detectExpoDefaults(cwd);
     if (expoDefaults) {
-      log(
-        `${C.dim}default build: ${expoDefaults.packageManager} expo run:* (Release / release)${C.reset}`,
-      );
-      augmented.build = expoNativeDefaultHooks(expoDefaults);
+      const hooks = expoNativeDefaultHooks(expoDefaults);
+      const filled: string[] = [];
+      if (!augmented.build?.android) {
+        augmented.build = { ...augmented.build, android: hooks.android };
+        filled.push('android');
+      }
+      if (!augmented.build?.ios) {
+        augmented.build = { ...augmented.build, ios: hooks.ios };
+        filled.push('ios');
+      }
+      if (filled.length > 0) {
+        log(
+          `${C.dim}default build: ${expoDefaults.packageManager} expo run:* (Release / release) for ${
+            filled.join(' + ')
+          }${C.reset}`,
+        );
+      }
     }
   }
 

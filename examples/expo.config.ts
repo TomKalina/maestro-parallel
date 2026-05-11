@@ -11,7 +11,7 @@ import { spawn } from 'node:child_process';
 import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { defineConfig } from '../index.js';
+import { defineConfig } from 'jsr:@kaln/maestro-parallel/config';
 
 const SENTRY_DISABLE = { SENTRY_DISABLE_AUTO_UPLOAD: 'true' };
 

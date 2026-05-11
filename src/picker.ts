@@ -125,67 +125,81 @@ export async function pickDevices(devs: Device[], preselect: Set<string>): Promi
     Deno.removeSignalListener('SIGTERM', onSig);
   };
 
-  const buf = new Uint8Array(8);
-  const dec = new TextDecoder();
-  for (;;) {
-    const n = await Deno.stdin.read(buf);
-    if (n === null) {
-      await cleanup();
-      removeSig();
-      return fatal('Stdin closed.');
-    }
-    const chunk = buf.subarray(0, n);
-    const s = dec.decode(chunk);
+  // Wrap the loop in try/finally so an unexpected stdin.read() throw
+  // can't leave the terminal in raw mode with a hidden cursor.
+  // Successful exits short-circuit by setting `result` and breaking.
+  let result: Device[] | null = null;
+  try {
+    const buf = new Uint8Array(8);
+    const dec = new TextDecoder();
+    outer: for (;;) {
+      const n = await Deno.stdin.read(buf);
+      if (n === null) {
+        // Stdin closed mid-prompt — exit cleanly through the finally.
+        break;
+      }
+      const chunk = buf.subarray(0, n);
+      const s = dec.decode(chunk);
 
-    if (s === '\x03') {
-      await cleanup();
-      removeSig();
-      fatal('Aborted.');
-    }
-    if (s === '\x1b' && chunk.length === 1) {
-      await cleanup();
-      await write('\n');
-      removeSig();
-      fatal('Cancelled.');
-    }
-    if (s === '\r' || s === '\n') {
-      await cleanup();
-      await write('\n');
-      removeSig();
-      return devs.filter((_, i) => checked[i]);
-    }
-    if (s === ' ') {
-      checked[cursor] = !checked[cursor];
-      await render(false);
-      continue;
-    }
-    if (s === 'a' || s === 'A') {
-      const allOn = checked.every(Boolean);
-      for (let i = 0; i < checked.length; i++) checked[i] = !allOn;
-      await render(false);
-      continue;
-    }
-    if (chunk[0] === 0x1b && chunk[1] === 0x5b) {
-      if (chunk[2] === 0x41) {
+      if (s === '\x03') {
+        // Ctrl-C — same path as the SIGINT handler. Restore the
+        // terminal before letting fatal() exit the process.
+        await cleanup();
+        removeSig();
+        fatal('Aborted.');
+      }
+      if (s === '\x1b' && chunk.length === 1) {
+        await cleanup();
+        await write('\n');
+        removeSig();
+        fatal('Cancelled.');
+      }
+      if (s === '\r' || s === '\n') {
+        await write('\n');
+        result = devs.filter((_, i) => checked[i]);
+        break outer;
+      }
+      if (s === ' ') {
+        checked[cursor] = !checked[cursor];
+        await render(false);
+        continue;
+      }
+      if (s === 'a' || s === 'A') {
+        const allOn = checked.every(Boolean);
+        for (let i = 0; i < checked.length; i++) checked[i] = !allOn;
+        await render(false);
+        continue;
+      }
+      if (chunk[0] === 0x1b && chunk[1] === 0x5b) {
+        if (chunk[2] === 0x41) {
+          cursor = (cursor - 1 + devs.length) % devs.length;
+          await render(false);
+          continue;
+        }
+        if (chunk[2] === 0x42) {
+          cursor = (cursor + 1) % devs.length;
+          await render(false);
+          continue;
+        }
+      }
+      if (s === 'k') {
         cursor = (cursor - 1 + devs.length) % devs.length;
         await render(false);
         continue;
       }
-      if (chunk[2] === 0x42) {
+      if (s === 'j') {
         cursor = (cursor + 1) % devs.length;
         await render(false);
         continue;
       }
     }
-    if (s === 'k') {
-      cursor = (cursor - 1 + devs.length) % devs.length;
-      await render(false);
-      continue;
-    }
-    if (s === 'j') {
-      cursor = (cursor + 1) % devs.length;
-      await render(false);
-      continue;
-    }
+  } finally {
+    await cleanup();
+    removeSig();
   }
+
+  if (result === null) {
+    return fatal('Stdin closed.');
+  }
+  return result;
 }
