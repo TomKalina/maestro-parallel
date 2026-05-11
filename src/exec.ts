@@ -1,25 +1,28 @@
 // Subprocess wrappers used everywhere. `run` captures, `spawnPrefixed`
 // streams with a per-line prefix (used for build/install + maestro).
 
-import { spawn } from 'node:child_process';
-import { writeFile, open } from 'node:fs/promises';
-
 export interface RunResult {
   code: number;
   stdout: string;
   stderr: string;
 }
 
-export function run(cmd: string, args: string[]): Promise<RunResult> {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (b: Buffer) => (stdout += b.toString('utf8')));
-    child.stderr.on('data', (b: Buffer) => (stderr += b.toString('utf8')));
-    child.on('error', () => resolve({ code: 127, stdout, stderr }));
-    child.on('close', (code) => resolve({ code: code ?? 0, stdout, stderr }));
-  });
+export async function run(cmd: string, args: string[]): Promise<RunResult> {
+  try {
+    const out = await new Deno.Command(cmd, {
+      args,
+      stdout: 'piped',
+      stderr: 'piped',
+    }).output();
+    const dec = new TextDecoder();
+    return {
+      code: out.code,
+      stdout: dec.decode(out.stdout),
+      stderr: dec.decode(out.stderr),
+    };
+  } catch {
+    return { code: 127, stdout: '', stderr: '' };
+  }
 }
 
 export async function has(cmd: string): Promise<boolean> {
@@ -53,59 +56,61 @@ export async function spawnPrefixedTee(
   extraEnv: Record<string, string> = {},
 ): Promise<number> {
   // Truncate the file first so re-runs overwrite cleanly.
-  await writeFile(logFilePath, '');
-  const handle = await open(logFilePath, 'a');
+  await Deno.writeTextFile(logFilePath, '');
+  const file = await Deno.open(logFilePath, { append: true });
   try {
-    return await spawnPrefixedInternal(cmd, args, cwd, prefix, extraEnv, handle);
+    return await spawnPrefixedInternal(cmd, args, cwd, prefix, extraEnv, file);
   } finally {
-    await handle.close();
+    file.close();
   }
 }
 
-function spawnPrefixedInternal(
+async function spawnPrefixedInternal(
   cmd: string,
   args: string[],
   cwd: string,
   prefix: string,
   extraEnv: Record<string, string>,
-  // deno-lint-ignore no-explicit-any
-  logHandle: any,
+  logFile: Deno.FsFile | null,
 ): Promise<number> {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, args, {
+  let child: Deno.ChildProcess;
+  try {
+    child = new Deno.Command(cmd, {
+      args,
       cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ...extraEnv },
-    });
+      stdin: 'null',
+      stdout: 'piped',
+      stderr: 'piped',
+      env: extraEnv,
+    }).spawn();
+  } catch {
+    return 127;
+  }
 
-    const enc = new TextEncoder();
-    let stdoutCarry = '';
-    let stderrCarry = '';
+  const enc = new TextEncoder();
+  const dec = new TextDecoder();
 
-    const handleChunk = async (b: Buffer, isStderr: boolean): Promise<void> => {
-      const text = (isStderr ? stderrCarry : stdoutCarry) + b.toString('utf8');
+  const pump = async (stream: ReadableStream<Uint8Array>): Promise<void> => {
+    let carry = '';
+    for await (const chunk of stream) {
+      const text = carry + dec.decode(chunk, { stream: true });
       const lines = text.split('\n');
-      const carry = lines.pop() ?? '';
-      if (isStderr) stderrCarry = carry;
-      else stdoutCarry = carry;
+      carry = lines.pop() ?? '';
       for (const line of lines) {
-        process.stdout.write(`${prefix}${line}\n`);
-        if (logHandle) await logHandle.write(enc.encode(line + '\n'));
+        await Deno.stdout.write(enc.encode(`${prefix}${line}\n`));
+        if (logFile) await logFile.write(enc.encode(line + '\n'));
       }
-    };
+    }
+    if (carry) {
+      await Deno.stdout.write(enc.encode(prefix + carry + '\n'));
+      if (logFile) await logFile.write(enc.encode(carry + '\n'));
+    }
+  };
 
-    child.stdout.on('data', (b: Buffer) => void handleChunk(b, false));
-    child.stderr.on('data', (b: Buffer) => void handleChunk(b, true));
-    child.on('error', () => resolve(127));
-    child.on('close', async (code) => {
-      // Flush any final partial line.
-      for (const carry of [stdoutCarry, stderrCarry]) {
-        if (carry) {
-          process.stdout.write(prefix + carry + '\n');
-          if (logHandle) await logHandle.write(enc.encode(carry + '\n'));
-        }
-      }
-      resolve(code ?? 0);
-    });
-  });
+  const [{ code }] = await Promise.all([
+    child.status,
+    pump(child.stdout),
+    pump(child.stderr),
+  ]);
+  return code;
 }

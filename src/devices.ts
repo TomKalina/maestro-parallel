@@ -2,12 +2,30 @@
 // + connected USB devices). Each helper returns [] when its CLI is missing,
 // so projects on Linux without xcrun still see Android devices.
 
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { has, run } from './exec.js';
-import type { Device, DeviceKind } from './types.js';
-import { C } from './ui.js';
+import { join } from '@std/path';
+import { has, run } from './exec.ts';
+import type { Device, DeviceKind } from './types.ts';
+import { C } from './ui.ts';
+
+/**
+ * Returns adb entries that are in a non-`device` state (unauthorized,
+ * offline, no permissions, …). Maestro 2.5.1 fails to match ANY device by
+ * UDID when an unauthorized entry sits in `adb devices` output — surface
+ * these so the user can unplug or `adb -s <id> reconnect` first.
+ */
+export async function detectBrokenAndroidDevices(): Promise<{ id: string; state: string }[]> {
+  if (!(await has('adb'))) return [];
+  const r = await run('adb', ['devices']);
+  if (r.code !== 0) return [];
+  const broken: { id: string; state: string }[] = [];
+  for (const raw of r.stdout.split('\n').slice(1)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('*')) continue;
+    const [id, state] = line.split(/\s+/);
+    if (id && state && state !== 'device') broken.push({ id, state });
+  }
+  return broken;
+}
 
 async function listAndroid(): Promise<Device[]> {
   if (!(await has('adb'))) return [];
@@ -73,7 +91,11 @@ interface DevicectlOutput {
     devices?: Array<{
       identifier?: string;
       deviceProperties?: { name?: string; osVersionNumber?: string };
-      connectionProperties?: { tunnelState?: string };
+      connectionProperties?: {
+        tunnelState?: string;
+        pairingState?: string;
+        transportType?: string;
+      };
       hardwareProperties?: { udid?: string; platform?: string };
     }>;
   };
@@ -81,16 +103,22 @@ interface DevicectlOutput {
 
 async function listIosPhysical(): Promise<Device[]> {
   if (!(await has('xcrun'))) return [];
-  const dir = await mkdtemp(join(tmpdir(), 'maestro-parallel-'));
+  const dir = await Deno.makeTempDir({ prefix: 'maestro-parallel-' });
   const tmpJson = join(dir, 'devices.json');
   try {
     const r = await run('xcrun', ['devicectl', 'list', 'devices', '--json-output', tmpJson]);
     if (r.code !== 0) return [];
-    const parsed = JSON.parse(await readFile(tmpJson, 'utf8')) as DevicectlOutput;
+    const parsed = JSON.parse(await Deno.readTextFile(tmpJson)) as DevicectlOutput;
     const out: Device[] = [];
     for (const d of parsed.result?.devices ?? []) {
       if (d.hardwareProperties?.platform && d.hardwareProperties.platform !== 'iOS') continue;
-      if (d.connectionProperties?.tunnelState !== 'connected') continue;
+      // Accept any paired wired device. `tunnelState` is "disconnected" between
+      // active runs; Maestro re-establishes the developer tunnel on demand.
+      // Filtering on tunnelState === 'connected' would hide usable devices.
+      const cp = d.connectionProperties ?? {};
+      const paired = cp.pairingState === 'paired';
+      const wired = !cp.transportType || cp.transportType === 'wired';
+      if (!paired || !wired) continue;
       const id = d.hardwareProperties?.udid ?? d.identifier;
       if (!id) continue;
       out.push({
@@ -108,7 +136,7 @@ async function listIosPhysical(): Promise<Device[]> {
   } catch {
     return [];
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await Deno.remove(dir, { recursive: true });
   }
 }
 

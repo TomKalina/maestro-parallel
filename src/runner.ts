@@ -2,14 +2,12 @@
 // One process per device is the safe default; iOS shard-all is opt-in
 // because the host XCTestDriver serialises gestures across simulators.
 
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { ResolvedConfig } from './config.js';
-import { devicePrefix } from './devices.js';
-import { spawnPrefixedTee } from './exec.js';
-import type { Device, GroupRunResult, Platform, RunResult } from './types.js';
-import { C, log } from './ui.js';
+import { join } from '@std/path';
+import type { ResolvedConfig } from './config.ts';
+import { devicePrefix } from './devices.ts';
+import { run, spawnPrefixedTee } from './exec.ts';
+import type { Device, GroupRunResult, Platform, RunResult } from './types.ts';
+import { C, log } from './ui.ts';
 
 function deviceSlug(d: Device): string {
   return `${d.platform}-${d.name.replace(/[^A-Za-z0-9]+/g, '_')}-${d.id.slice(0, 8)}`;
@@ -18,7 +16,7 @@ function deviceSlug(d: Device): string {
 function envFlags(extraEnv: Record<string, string>): string[] {
   const out: string[] = [];
   for (const [k, v] of Object.entries(extraEnv)) {
-    if (process.env[k] !== undefined) continue;
+    if (Deno.env.get(k) !== undefined) continue;
     out.push('-e', `${k}=${v}`);
   }
   return out;
@@ -31,7 +29,7 @@ export async function makeShardConfig(cwd: string, configPath: string): Promise<
   const src = join(cwd, configPath);
   let txt: string;
   try {
-    txt = await readFile(src, 'utf8');
+    txt = await Deno.readTextFile(src);
   } catch {
     return null;
   }
@@ -51,9 +49,9 @@ export async function makeShardConfig(cwd: string, configPath: string): Promise<
     }
     out.push(line);
   }
-  const tmpDir = await mkdtemp(join(tmpdir(), 'maestro-parallel-'));
+  const tmpDir = await Deno.makeTempDir({ prefix: 'maestro-parallel-' });
   const tmp = join(tmpDir, 'config.yaml');
-  await writeFile(tmp, out.join('\n'));
+  await Deno.writeTextFile(tmp, out.join('\n'));
   return tmp;
 }
 
@@ -69,8 +67,9 @@ export async function runDevice(
   config: ResolvedConfig,
 ): Promise<RunResult> {
   const outDir = join(outBase, deviceSlug(d));
-  await mkdir(outDir, { recursive: true });
+  await Deno.mkdir(outDir, { recursive: true });
 
+  const isIosPhysical = d.platform === 'ios' && d.kind === 'usb';
   const args = [
     'test',
     '-p',
@@ -86,11 +85,55 @@ export async function runDevice(
     '--output',
     join(outDir, 'report.xml'),
     '--no-ansi',
+    // Maestro 2.5.x builds the iOS WebDriver on demand for physical iPhones
+    // and needs a team to code-sign it. Pass through when configured.
+    ...(isIosPhysical && config.appleTeamId ? ['--apple-team-id', config.appleTeamId] : []),
     ...envFlags(config.maestroEnv),
     config.flowsDir,
   ];
 
   const prefix = devicePrefix(d, color, prefixWidth);
+
+  // iOS simulator: launch the release app directly via `simctl launch` so
+  // it is in the foreground when Maestro's first step runs. Without this,
+  // flows that lack an explicit `- launchApp` step (Maestro does not auto-
+  // launch from `appId` alone) sit on the home screen and fail with
+  // "Element not found".
+  if (d.platform === 'ios' && d.kind === 'simulator' && config.bundleId) {
+    const r = await run('xcrun', ['simctl', 'launch', d.id, config.bundleId]);
+    if (r.code === 0) {
+      log(`${prefix}${C.dim}launched ${config.bundleId} on sim${C.reset}`);
+    }
+  }
+
+  // The CoreDevice tunnel decays ~10 s after the last `devicectl` call. For
+  // physical iOS we refresh it immediately before `maestro test` so the
+  // tunnel is live when Maestro looks up the device.
+  if (isIosPhysical) {
+    try {
+      const wake = new Deno.Command('xcrun', {
+        args: ['devicectl', 'device', 'info', 'details', '--device', d.id],
+        stdin: 'null',
+        stdout: 'null',
+        stderr: 'null',
+      }).spawn();
+      // Give the daemon ~1.5 s to establish the tunnel. After maestro takes
+      // over, we kill the wake child — it has done its job.
+      await new Promise<void>((r) => setTimeout(r, 1500));
+      try {
+        wake.kill('SIGTERM');
+      } catch { /* already done */ }
+      // Reap the child so its status promise does not become an unhandled
+      // rejection on shutdown.
+      await wake.status.catch(() => undefined);
+    } catch { /* xcrun missing — let maestro fail clearly */ }
+    if (!config.appleTeamId) {
+      log(
+        `${prefix}${C.yellow}warning: physical iOS without appleTeamId — Maestro will fail to build the iOS driver. Set 'appleTeamId' in your config or use --apple-team-id.${C.reset}`,
+      );
+    }
+  }
+
   log(`${prefix}${C.bold}start${C.reset} ${d.id}`);
 
   const exitCode = await spawnPrefixedTee(
@@ -122,7 +165,7 @@ export async function runShardGroup(
   config: ResolvedConfig,
 ): Promise<GroupRunResult> {
   const outDir = join(outBase, `${platform}-shard`);
-  await mkdir(outDir, { recursive: true });
+  await Deno.mkdir(outDir, { recursive: true });
   const ids = devices.map((d) => d.id);
 
   const args: string[] = [
@@ -151,6 +194,7 @@ export async function runShardGroup(
     ? tagLabel.slice(0, prefixLabelWidth)
     : tagLabel.padEnd(prefixLabelWidth);
   const prefix = `${color}[${padded}]${C.reset} `;
+
   log(
     `${prefix}${C.bold}start${C.reset} ${ids.length} ${platform} devices in shard mode: ${
       ids.join(', ')

@@ -6,8 +6,8 @@
 // SpringBoard above the app surface and cannot be dismissed from inside a
 // flow.
 
-import { run } from './exec.js';
-import { C, log } from './ui.js';
+import { run } from './exec.ts';
+import { C, log } from './ui.ts';
 
 export async function setupIosSim(udid: string): Promise<void> {
   // Different iOS versions read the AutoFill toggle from different defaults
@@ -36,6 +36,20 @@ export async function setupIosSim(udid: string): Promise<void> {
   ]);
   // Wipe any saved credential so the prompt has nothing to offer to save.
   await run('xcrun', ['simctl', 'keychain', udid, 'reset']);
+  // Keep the simulator's screen awake during the run. Without this the sim
+  // auto-locks after ~1 min and Maestro starts failing on the blank
+  // SpringBoard surface above the app.
+  await run('xcrun', [
+    'simctl',
+    'spawn',
+    udid,
+    'defaults',
+    'write',
+    'com.apple.springboard',
+    'SBIdleTimerDisabled',
+    '-bool',
+    'true',
+  ]);
 }
 
 /** Run setupIosSim against every currently-booted simulator. CLI helper. */

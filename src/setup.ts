@@ -3,12 +3,13 @@
 // rest. The build step is delegated to the user's config — we do not know
 // whether they use Expo, bare RN, native Xcode/Gradle, etc.
 
-import type { ResolvedConfig } from './config.js';
-import { devicePrefix } from './devices.js';
-import { run, spawnPrefixed } from './exec.js';
-import { setupIosSim } from './setupIosSim.js';
-import type { Device, Platform } from './types.js';
-import { C, log } from './ui.js';
+import type { BuildMode } from './buildMode.ts';
+import type { ResolvedConfig } from './config.ts';
+import { devicePrefix } from './devices.ts';
+import { run, spawnPrefixed } from './exec.ts';
+import { setupIosSim } from './setupIosSim.ts';
+import type { Device, Platform } from './types.ts';
+import { C, log } from './ui.ts';
 
 // Wake every Android device and keep its screen on so Maestro can interact
 // with the app. A locked screen leaves NotificationShade focused above the
@@ -18,14 +19,107 @@ import { C, log } from './ui.js';
 export async function wakeAndroidDevices(devices: Device[]): Promise<void> {
   const androids = devices.filter((d) => d.platform === 'android');
   if (androids.length === 0) return;
+  const stillLocked: string[] = [];
   await Promise.all(androids.map(async (d) => {
     await run('adb', ['-s', d.id, 'shell', 'input', 'keyevent', 'KEYCODE_WAKEUP']);
+    // Swipe up from bottom to dismiss the swipe-lock screen on devices without a PIN.
+    // Coords are deliberately generic — work on phones from ~720p up.
+    await run('adb', ['-s', d.id, 'shell', 'input', 'swipe', '500', '1500', '500', '300', '150']);
     await run('adb', ['-s', d.id, 'shell', 'input', 'keyevent', 'KEYCODE_MENU']);
     await run('adb', ['-s', d.id, 'shell', 'svc', 'power', 'stayon', 'true']);
+    // Re-check keyguard state. If still locked, the device almost certainly has a PIN
+    // and the user must unlock it manually — Maestro tests will fail until they do.
+    const dump = await run('adb', ['-s', d.id, 'shell', 'dumpsys', 'window']);
+    if (/mDreamingLockscreen=true|isStatusBarKeyguard=true/.test(dump.stdout)) {
+      stillLocked.push(`${d.name} (${d.id})`);
+    }
   }));
   log(
     `${C.dim}woke ${androids.length} Android device(s) and enabled stay-on-while-charging${C.reset}`,
   );
+  if (stillLocked.length > 0) {
+    log(
+      `${C.yellow}warning: device still locked (probably PIN-protected): ${
+        stillLocked.join(', ')
+      } — unlock manually before tests start${C.reset}`,
+    );
+  }
+}
+
+// iOS has no public programmatic equivalent of `svc power stayon` for physical
+// devices — Auto-Lock is a Settings toggle and Apple does not expose it via
+// xcrun/devicectl. Best we can do is warn so the user disables it manually
+// (Settings → Display & Brightness → Auto-Lock → Never). iOS simulators ARE
+// handled — `setupIosSim` writes `SBIdleTimerDisabled` for those.
+export function warnIosPhysicalAutoLock(devices: Device[]): void {
+  const physical = devices.filter((d) => d.platform === 'ios' && d.kind === 'usb');
+  if (physical.length === 0) return;
+  log(
+    `${C.yellow}poznámka: iOS fyzické zařízení (${
+      physical.map((d) => d.name).join(', ')
+    }) — Auto-Lock nelze vypnout programaticky. Nastav: Nastavení → Displej a jas → Uzamknout displej po → Nikdy.${C.reset}`,
+  );
+}
+
+/**
+ * Handle for an active set of CoreDevice tunnels. Call `.stop()` once tests
+ * finish to release them. Idempotent.
+ */
+export interface IosTunnelHandle {
+  stop: () => Promise<void>;
+}
+
+// Bring up Apple's CoreDevice tunnel for each physical iOS device. Between
+// runs `xcrun devicectl list devices` reports `tunnelState=disconnected`
+// even for paired wired devices, and Maestro then refuses with
+// "Device X was requested, but it is not connected.". `devicectl device
+// info details` triggers the daemon to establish the tunnel — but the
+// tunnel decays again shortly after the command exits, which is too soon
+// when tests start staggered seconds later. So we keep the command running
+// for the duration of the test run and kill it during teardown.
+export async function wakeIosPhysicalTunnels(devices: Device[]): Promise<IosTunnelHandle> {
+  const physical = devices.filter((d) => d.platform === 'ios' && d.kind === 'usb');
+  const empty: IosTunnelHandle = { stop: () => Promise.resolve() };
+  if (physical.length === 0) return empty;
+
+  log(
+    `${C.dim}establishing iOS tunnel(s) for ${physical.map((d) => d.name).join(', ')}...${C.reset}`,
+  );
+
+  const children: Deno.ChildProcess[] = [];
+  await Promise.all(physical.map(async (d) => {
+    let child: Deno.ChildProcess;
+    try {
+      child = new Deno.Command('xcrun', {
+        args: ['devicectl', 'device', 'info', 'details', '--device', d.id],
+        stdin: 'null',
+        stdout: 'null',
+        stderr: 'null',
+      }).spawn();
+    } catch {
+      return;
+    }
+    children.push(child);
+    // Give the daemon ~3 s to bring the tunnel up. The child is left running
+    // afterwards to keep the tunnel alive for the rest of the run.
+    await new Promise<void>((r) => setTimeout(r, 3000));
+  }));
+
+  log(`${C.dim}iOS tunnel(s) ready (${children.length} keepalive process(es))${C.reset}`);
+
+  let stopped = false;
+  return {
+    stop: async () => {
+      if (stopped) return;
+      stopped = true;
+      for (const c of children) {
+        try {
+          c.kill('SIGTERM');
+        } catch { /* already gone */ }
+      }
+      await Promise.all(children.map((c) => c.status.catch(() => undefined)));
+    },
+  };
 }
 
 // Wipe app data on every selected device so each test run starts from a
@@ -40,6 +134,17 @@ export async function clearAppState(devices: Device[], bundleId: string): Promis
     } else if (d.kind === 'simulator') {
       await run('xcrun', ['simctl', 'terminate', d.id, bundleId]);
       await run('xcrun', ['simctl', 'privacy', d.id, 'reset', 'all', bundleId]);
+      // `simctl privacy reset` only clears permission grants. To match the
+      // Android `pm clear` semantics — wipe storage, preferences, keychain
+      // — also rm the app's data container. Equivalent to a re-install but
+      // leaves the .app bundle in place (no re-build needed).
+      const r = await run('xcrun', ['simctl', 'get_app_container', d.id, bundleId, 'data']);
+      const dataPath = r.code === 0 ? r.stdout.trim() : '';
+      if (dataPath) {
+        try {
+          await Deno.remove(dataPath, { recursive: true });
+        } catch { /* not present or already gone */ }
+      }
       // Disable iOS keychain "Save Password?" prompt which otherwise blocks flows.
       await setupIosSim(d.id);
     }
@@ -74,10 +179,13 @@ export async function buildAndInstall(
   config: ResolvedConfig,
   colorOf: (d: Device) => string,
   prefixWidth: number,
+  mode: BuildMode,
 ): Promise<void> {
   log('');
   log(
-    `${C.bold}Build & install (${devices.length} device${devices.length > 1 ? 's' : ''})${C.reset}`,
+    `${C.bold}Build & install (${devices.length} device${
+      devices.length > 1 ? 's' : ''
+    }, mode: ${mode})${C.reset}`,
   );
 
   const groups = new Map<GroupKey, Device[]>();
@@ -101,30 +209,29 @@ export async function buildAndInstall(
     const firstPrefix = devicePrefix(first, colorOf(first), prefixWidth);
     const firstLog = (line: string): void => log(`${firstPrefix}${line}`);
 
-    firstLog(`${C.bold}build & install (group: ${groupKey})${C.reset}`);
+    firstLog(`${C.bold}build & install (group: ${groupKey}, mode: ${mode})${C.reset}`);
     const artifact = await hooks.buildAndInstallFirst({
       device: first,
       group: groupDevices,
       cwd,
       log: firstLog,
+      mode,
     });
+
+    if (!artifact) {
+      // Hook returned null = build OR first install failed. Skip the per-
+      // device fan-out (it would just re-run the same broken build N times
+      // for 8 s each). Tests can still run against whatever's already on
+      // the devices.
+      firstLog(
+        `${C.yellow}build failed for ${groupKey}; skipping install on ${rest.length} other device(s). Tests will run against the previously-installed app.${C.reset}`,
+      );
+      continue;
+    }
+
     firstLog(`${C.green}built & installed${C.reset}`);
 
     if (rest.length === 0) continue;
-
-    if (!artifact) {
-      firstLog(
-        `${C.yellow}artifact path not returned from hook; falling back to per-device build for ${rest.length} device(s)${C.reset}`,
-      );
-      for (const d of rest) {
-        const p = devicePrefix(d, colorOf(d), prefixWidth);
-        const dLog = (line: string): void => log(`${p}${line}`);
-        dLog(`${C.bold}build & install (per-device fallback)${C.reset}`);
-        await hooks.buildAndInstallFirst({ device: d, group: [d], cwd, log: dLog });
-        dLog(`${C.green}installed${C.reset}`);
-      }
-      continue;
-    }
 
     firstLog(`${C.dim}artifact: ${artifact.path}${C.reset}`);
 
@@ -134,7 +241,7 @@ export async function buildAndInstall(
       let code: number;
       if (hooks.installExisting) {
         code = await hooks.installExisting(
-          { device: d, group: [d], cwd, log: (line) => log(`${p}${line}`) },
+          { device: d, group: [d], cwd, log: (line) => log(`${p}${line}`), mode },
           artifact,
         );
       } else if (groupKey === 'android') {
@@ -150,12 +257,13 @@ export async function buildAndInstall(
           group: [d],
           cwd,
           log: (line) => log(`${p}${line}`),
+          mode,
         });
         code = 0;
       }
       if (code !== 0) {
         log(`${p}${C.red}install failed (exit ${code})${C.reset}`);
-        process.exit(code);
+        Deno.exit(code);
       }
       log(`${p}${C.green}installed${C.reset}`);
     });

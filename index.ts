@@ -8,14 +8,14 @@ export {
   defineConfig,
   type MaestroParallelConfig,
   type PlatformBuildHooks,
+  resolveConfig,
   type ResolvedArtifact,
   type ResolvedConfig,
-  resolveConfig,
-} from './src/config.js';
+} from './src/config.ts';
 
-export { discoverDevices } from './src/devices.js';
-export { setupAllBootedSimulators, setupIosSim } from './src/setupIosSim.js';
-export { runMaestroParallel, type RunOptions } from './src/main.js';
+export { discoverDevices } from './src/devices.ts';
+export { setupAllBootedSimulators, setupIosSim } from './src/setupIosSim.ts';
+export { runMaestroParallel, type RunOptions } from './src/main.ts';
 export type {
   Device,
   DeviceKind,
@@ -23,4 +23,4 @@ export type {
   JunitCounts,
   Platform,
   RunResult,
-} from './src/types.js';
+} from './src/types.ts';

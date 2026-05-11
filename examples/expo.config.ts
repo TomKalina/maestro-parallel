@@ -1,6 +1,11 @@
-// Example: a typical Expo / React Native project. The build hooks shell
-// out to `pnpm expo run:<platform>` for the first device in each group;
-// the runner then reuses the produced .apk / .app on the rest.
+// Example: a typical Expo / React Native project.
+//
+// Build hooks always produce a RELEASE artifact — dev / dev-client builds
+// are structurally flaky for E2E and maestro-parallel does not support
+// them. JS bundle is baked in, no Metro at runtime.
+//
+// First device in each platform group runs the build; the runner then
+// reuse-installs the produced .apk / .app on the rest of the group.
 
 import { spawn } from 'node:child_process';
 import { readdir, stat } from 'node:fs/promises';
@@ -25,7 +30,8 @@ async function findApk(cwd: string): Promise<string | null> {
 }
 
 async function findIosApp(cwd: string, kind: 'simulator' | 'usb'): Promise<string | null> {
-  const productDir = kind === 'simulator' ? 'Release-iphonesimulator' : 'Release-iphoneos';
+  const sdk = kind === 'simulator' ? 'iphonesimulator' : 'iphoneos';
+  const productDir = `Release-${sdk}`;
   const candidates = [
     join(homedir(), 'Library', 'Developer', 'Xcode', 'DerivedData'),
     join(cwd, 'ios', 'build', 'Build', 'Products'),
@@ -92,7 +98,7 @@ export default defineConfig({
     },
     ios: {
       async buildAndInstallFirst({ device, cwd, log }) {
-        log('expo run:ios (release)');
+        log('expo run:ios (Release)');
         const code = await spawnAsync(
           'pnpm',
           ['expo', 'run:ios', '--configuration', 'Release', '--device', device.buildTargetId],

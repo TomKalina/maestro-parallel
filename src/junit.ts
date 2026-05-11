@@ -1,16 +1,15 @@
 // Merge per-device JUnit reports into a single rolled-up document and
 // print a per-device summary table at the end.
 
-import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import type { JunitCounts, RunResult } from './types.js';
-import { C, log } from './ui.js';
+import { join } from '@std/path';
+import type { JunitCounts, RunResult } from './types.ts';
+import { C, log } from './ui.ts';
 
 export async function mergeJunit(results: RunResult[], outBase: string): Promise<string | null> {
   const xmls: string[] = [];
   for (const r of results) {
     try {
-      xmls.push(await readFile(join(r.outDir, 'report.xml'), 'utf8'));
+      xmls.push(await Deno.readTextFile(join(r.outDir, 'report.xml')));
     } catch { /* ignore */ }
   }
   if (xmls.length === 0) return null;
@@ -22,7 +21,7 @@ export async function mergeJunit(results: RunResult[], outBase: string): Promise
       .trim()
   ).join('\n');
   const path = join(outBase, 'report.xml');
-  await writeFile(
+  await Deno.writeTextFile(
     path,
     `<?xml version="1.0" encoding="UTF-8"?>\n<testsuites name="maestro-parallel">\n${inner}\n</testsuites>\n`,
   );
@@ -50,7 +49,7 @@ export async function summarize(
   for (const r of results) {
     let counts: JunitCounts | null = null;
     try {
-      counts = parseCounts(await readFile(join(r.outDir, 'report.xml'), 'utf8'));
+      counts = parseCounts(await Deno.readTextFile(join(r.outDir, 'report.xml')));
     } catch { /* ignore */ }
     const ok = r.exitCode === 0;
     const tally = counts

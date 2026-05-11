@@ -5,7 +5,8 @@
 // Library consumers may also import this module directly and pass a config
 // object to `runMaestroParallel()`.
 
-import type { Device, Platform } from './types.js';
+import type { BuildMode } from './buildMode.ts';
+import type { Device, Platform } from './types.ts';
 
 export interface BuildContext {
   /** First device picked in this platform group; the build is targeted at it. */
@@ -16,6 +17,8 @@ export interface BuildContext {
   cwd: string;
   /** Logger that prefixes every line with the device tag + colour. */
   log: (line: string) => void;
+  /** Selected build mode. Always `release` when this hook is invoked — `skip` short-circuits earlier. */
+  mode: BuildMode;
 }
 
 export interface ResolvedArtifact {
@@ -103,6 +106,43 @@ export interface MaestroParallelConfig {
    * Default false.
    */
   iosShardAll?: boolean;
+
+  /**
+   * 10-character Apple Developer Team ID. REQUIRED for physical iOS devices —
+   * Maestro 2.5.x builds its iOS WebDriver against the device and needs a
+   * team to code-sign the driver. Without it, runs on a connected iPhone
+   * fail with "Apple account team ID must be specified to build drivers".
+   * Find it in Xcode → Settings → Accounts → your team (or App Store
+   * Connect → Team ID). Ignored for simulators and Android.
+   */
+  appleTeamId?: string;
+
+  /**
+   * Delay (ms) between starting consecutive Maestro processes. Workaround
+   * for a Maestro 2.5.x race: the per-process session log directory is
+   * timestamped to the second (`~/Library/Logs/maestro/YYYY-MM-DD_HHMMSS`),
+   * so two processes that start in the same second collide. The first one
+   * to finalize zips and removes the dir; the rest fail with
+   * `NoSuchFileException`. Default 1100 ms (> 1 s). Set to 0 to disable.
+   */
+  processStartStaggerMs?: number;
+
+  /**
+   * Pre-selected build mode. When set, skips the interactive prompt:
+   *   - `release` (recommended): build a real production-style artifact.
+   *   - `skip`: don't build or install; assume the app is already on each
+   *     device. Equivalent to the legacy `--skip-build` flag.
+   *
+   * Dev / dev-client builds are intentionally NOT supported — they are
+   * structurally flaky for E2E (dev-launcher picker, dev-menu onboarding
+   * overlay, Fast Refresh races, Metro disconnects) and the workarounds
+   * (preflight flows, adb reverse, deep links) trade one failure mode for
+   * another. Build a release artifact instead.
+   *
+   * CLI flags `--release` / `--skip-build` override this. In a non-TTY
+   * environment without any explicit choice, the default is `release`.
+   */
+  buildMode?: BuildMode;
 }
 
 /** Identity helper for type-safe config in `.ts` config files. */
@@ -111,8 +151,21 @@ export function defineConfig(config: MaestroParallelConfig): MaestroParallelConf
 }
 
 export type ResolvedConfig =
-  & Required<Omit<MaestroParallelConfig, 'build' | 'hooks' | 'maestroEnv' | 'bundleId'>>
-  & Pick<MaestroParallelConfig, 'build' | 'hooks' | 'bundleId'>
+  & Required<
+    Omit<
+      MaestroParallelConfig,
+      | 'build'
+      | 'hooks'
+      | 'maestroEnv'
+      | 'bundleId'
+      | 'appleTeamId'
+      | 'buildMode'
+    >
+  >
+  & Pick<
+    MaestroParallelConfig,
+    'build' | 'hooks' | 'bundleId' | 'appleTeamId' | 'buildMode'
+  >
   & {
     maestroEnv: Record<string, string>;
   };
@@ -129,6 +182,9 @@ export function resolveConfig(c: MaestroParallelConfig): ResolvedConfig {
     hooks: c.hooks,
     iosSequential: c.iosSequential ?? true,
     iosShardAll: c.iosShardAll ?? false,
+    processStartStaggerMs: c.processStartStaggerMs ?? 2000,
+    appleTeamId: c.appleTeamId,
+    buildMode: c.buildMode,
   };
 }
 

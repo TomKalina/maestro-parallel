@@ -1,14 +1,13 @@
 // Auto-discover and load `maestroparallel.config.{ts,js,...}` from the
-// project root or any explicit path passed via `--config`. TS configs are
-// loaded via `jiti` so users don't need a build step for their config.
+// project root or any explicit path passed via `--config`. Deno runs TS
+// natively, so config files in TypeScript work without a separate loader.
 
-import { stat } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
-import { CONFIG_FILENAMES, type MaestroParallelConfig } from './config.js';
+import { isAbsolute, join, resolve, toFileUrl } from '@std/path';
+import { CONFIG_FILENAMES, type MaestroParallelConfig } from './config.ts';
 
 async function fileExists(path: string): Promise<boolean> {
   try {
-    return (await stat(path)).isFile();
+    return (await Deno.stat(path)).isFile;
   } catch {
     return false;
   }
@@ -32,19 +31,13 @@ export async function loadConfig(
   if (!path) return null;
 
   if (path.endsWith('.json')) {
-    const txt = await (await import('node:fs/promises')).readFile(path, 'utf8');
+    const txt = await Deno.readTextFile(path);
     return { path, config: JSON.parse(txt) as MaestroParallelConfig };
   }
 
-  let mod: Record<string, unknown>;
-  if (path.endsWith('.ts') || path.endsWith('.mts')) {
-    // jiti transpiles TS for Node without a build step.
-    const { createJiti } = await import('jiti');
-    const jiti = createJiti(import.meta.url, { interopDefault: true });
-    mod = await jiti.import(path) as Record<string, unknown>;
-  } else {
-    mod = await import(path) as Record<string, unknown>;
-  }
+  // Deno can import .ts / .mts / .js / .mjs / .cjs natively. file:// URL is
+  // required for absolute filesystem paths in dynamic imports.
+  const mod = await import(toFileUrl(path).href) as Record<string, unknown>;
   const config = (mod.default ?? mod.config) as MaestroParallelConfig | undefined;
   if (!config) {
     throw new Error(

@@ -1,6 +1,7 @@
-#!/usr/bin/env node
-// CLI entry — run as `maestro-parallel` after `npm i -D maestro-parallel`
-// (or globally via `npm i -g`).
+#!/usr/bin/env -S deno run -A
+// CLI entry — run as `maestro-parallel`:
+//   - via JSR: `deno run -A jsr:@kaln/maestro-parallel/cli`
+//   - via npm: `npx maestro-parallel` (after dnt build & publish)
 //
 // Usage patterns:
 //   maestro-parallel                      # auto-detect .maestro/ flows
@@ -8,14 +9,13 @@
 //   maestro-parallel --config ./mp.config.ts
 //   maestro-parallel setup-ios-sim        # disable AutoFill on every booted sim
 
-import { stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { parseArgs } from 'node:util';
-import { defineConfig, type MaestroParallelConfig } from './src/config.js';
-import { loadConfig } from './src/loadConfig.js';
-import { runMaestroParallel } from './src/main.js';
-import { setupAllBootedSimulators } from './src/setupIosSim.js';
-import { C, fatal, log } from './src/ui.js';
+import { resolve } from '@std/path';
+import { parseArgs } from '@std/cli/parse-args';
+import { defineConfig, type MaestroParallelConfig } from './src/config.ts';
+import { loadConfig } from './src/loadConfig.ts';
+import { runMaestroParallel } from './src/main.ts';
+import { setupAllBootedSimulators } from './src/setupIosSim.ts';
+import { C, fatal, log } from './src/ui.ts';
 
 const HELP = `
 maestro-parallel — run Maestro flows on multiple devices in parallel.
@@ -29,18 +29,31 @@ Options:
                         maestroparallel.config.{ts,mts,js,mjs,cjs,json}.
                         With no config and no [path], defaults to .maestro/.
       --all             Run on every discovered device (skip the picker).
-      --skip-build      Skip build & install. Assumes the app is installed.
+      --release         Build a release artifact via the configured build
+                        hook, then run flows against it. Recommended (and
+                        the default when stdin is not a TTY).
+      --skip-build      Don't build or install; use whatever is already on
+                        each device. Without --release or --skip-build the
+                        runner prompts interactively.
       --skip-clear      Skip clearing app data before tests.
       --cwd <path>      Project root (default: current directory).
+      --apple-team-id <ID>
+                        10-character Apple Developer Team ID. REQUIRED for
+                        physical iOS — Maestro builds an on-device WebDriver
+                        and must sign it. Find in Xcode → Settings → Accounts.
+                        Also read from the MAESTRO_APPLE_TEAM_ID env var.
   -h, --help            Show this help.
   -v, --version         Show version.
 
 Examples:
-  # Zero-config: just run flows from .maestro/, no build, no clear
+  # Zero-config: ask interactively, run flows from .maestro/
   maestro-parallel
 
-  # Run a specific flow file
-  maestro-parallel .maestro/login_flow.yaml
+  # CI: skip the prompt, build release, run on every device
+  maestro-parallel --release --all
+
+  # Re-run flows against an already-installed build
+  maestro-parallel --skip-build .maestro/login_flow.yaml
 
   # With config (build hooks, bundleId for clearing app data, env vars)
   maestro-parallel --config ./e2e.config.ts
@@ -50,7 +63,7 @@ const VERSION = '0.1.0';
 
 async function pathExists(p: string): Promise<boolean> {
   try {
-    await stat(p);
+    await Deno.stat(p);
     return true;
   } catch {
     return false;
@@ -58,18 +71,10 @@ async function pathExists(p: string): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
-  const { values: args, positionals } = parseArgs({
-    args: process.argv.slice(2),
-    options: {
-      config: { type: 'string', short: 'c' },
-      cwd: { type: 'string' },
-      all: { type: 'boolean' },
-      'skip-build': { type: 'boolean' },
-      'skip-clear': { type: 'boolean' },
-      help: { type: 'boolean', short: 'h' },
-      version: { type: 'boolean', short: 'v' },
-    },
-    allowPositionals: true,
+  const args = parseArgs(Deno.args, {
+    alias: { c: 'config', h: 'help', v: 'version' },
+    string: ['config', 'cwd', 'apple-team-id'],
+    boolean: ['all', 'skip-build', 'skip-clear', 'release', 'help', 'version'],
   });
 
   if (args.help) {
@@ -81,15 +86,17 @@ async function main(): Promise<void> {
     return;
   }
 
+  const positionals = args._.map(String);
+
   if (positionals[0] === 'setup-ios-sim') {
     await setupAllBootedSimulators();
     return;
   }
 
-  const cwd = args.cwd ? resolve(args.cwd) : process.cwd();
+  const cwd = args.cwd ? resolve(args.cwd as string) : Deno.cwd();
   const flowsArg = positionals[0];
 
-  const loaded = await loadConfig(cwd, args.config);
+  const loaded = await loadConfig(cwd, args.config as string | undefined);
   let config: MaestroParallelConfig;
 
   if (loaded) {
@@ -98,11 +105,11 @@ async function main(): Promise<void> {
   } else if (args.config) {
     return fatal(`Config file not found: ${args.config}`);
   } else {
-    // Zero-config mode. Use sane defaults — flowsArg or .maestro/.
+    // Zero-config mode. Use sane defaults — flowsArg or .maestro/. Without
+    // a config there are no build hooks, so the build step is skipped
+    // (the runner re-checks this and logs accordingly).
     config = defineConfig({});
-    log(
-      `${C.dim}no config file found; running with defaults (skip-build/skip-clear implied)${C.reset}`,
-    );
+    log(`${C.dim}no config file found; running with defaults${C.reset}`);
   }
 
   if (flowsArg) {
@@ -113,19 +120,32 @@ async function main(): Promise<void> {
     config = { ...config, flowsDir: flowsArg };
   }
 
-  // Without a config or with no build hooks, build/clear are silently skipped
-  // by main.ts; the explicit flags here are for users who DO have a config
-  // but want to override on the fly.
+  // Source priority for the Apple Developer Team ID: CLI flag > config file >
+  // MAESTRO_APPLE_TEAM_ID env var. Env var is the recommended steady-state
+  // setup so the tool Just Works on every iPhone run.
+  const teamIdFromCli = args['apple-team-id'] as string | undefined;
+  const teamIdFromEnv = Deno.env.get('MAESTRO_APPLE_TEAM_ID');
+  const teamId = teamIdFromCli ?? config.appleTeamId ?? teamIdFromEnv;
+  if (teamId) {
+    config = { ...config, appleTeamId: teamId };
+  }
+
+  // Build mode resolution: --skip-build > --release > prompt.
+  let buildMode: 'release' | 'skip' | undefined;
+  if (args['skip-build']) buildMode = 'skip';
+  else if (args.release) buildMode = 'release';
+
   const code = await runMaestroParallel(config, {
     cwd,
-    allDevices: args.all,
-    skipBuild: args['skip-build'],
-    skipClear: args['skip-clear'],
+    allDevices: args.all as boolean | undefined,
+    skipBuild: args['skip-build'] as boolean | undefined,
+    skipClear: args['skip-clear'] as boolean | undefined,
+    buildMode,
   });
-  process.exit(code);
+  Deno.exit(code);
 }
 
 main().catch((e) => {
   console.error(`${C.red}fatal:${C.reset}`, e);
-  process.exit(1);
+  Deno.exit(1);
 });
