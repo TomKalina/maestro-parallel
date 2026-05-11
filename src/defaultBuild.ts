@@ -20,8 +20,17 @@
 
 import { join } from '@std/path';
 import type { PlatformBuildHooks } from './config.ts';
-import { spawnPrefixed } from './exec.ts';
+import { spawnPrefixedUntilMarker } from './exec.ts';
 import { C } from './ui.ts';
+
+// `expo run:*` does its real work (build + install + launch) and then
+// keeps running indefinitely streaming Metro / app logs — that's fine for
+// interactive dev but blocks an automated runner. We watch for the
+// "Opening on <device>" line that the Expo CLI prints right after the
+// install succeeds and before it starts streaming, then SIGTERM the
+// child. After that we have the app installed on the first device and
+// the artifact on disk for reuse-install on the rest of the group.
+const EXPO_RUN_DONE_MARKER = /^›\s*Opening on /;
 
 interface DetectedExpoDefaults {
   packageManager: 'pnpm' | 'yarn' | 'npm';
@@ -136,7 +145,7 @@ export function expoNativeDefaultHooks(
           ctx.device.buildTargetId,
         ]);
         ctx.log(`${C.dim}$ ${exe} ${args.join(' ')}${C.reset}`);
-        const code = await spawnPrefixed(exe, args, ctx.cwd, '');
+        const code = await spawnPrefixedUntilMarker(exe, args, ctx.cwd, '', EXPO_RUN_DONE_MARKER);
         if (code !== 0) {
           ctx.log(`${C.red}expo run:android failed (exit ${code})${C.reset}`);
           return null;
@@ -175,7 +184,7 @@ export function expoNativeDefaultHooks(
           ctx.device.buildTargetId,
         ]);
         ctx.log(`${C.dim}$ ${exe} ${args.join(' ')}${C.reset}`);
-        const code = await spawnPrefixed(exe, args, ctx.cwd, '');
+        const code = await spawnPrefixedUntilMarker(exe, args, ctx.cwd, '', EXPO_RUN_DONE_MARKER);
         if (code !== 0) {
           ctx.log(`${C.red}expo run:ios failed (exit ${code})${C.reset}`);
           return null;

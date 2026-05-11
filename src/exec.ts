@@ -65,6 +65,80 @@ export async function spawnPrefixedTee(
   }
 }
 
+/**
+ * Like `spawnPrefixed` but kills the child as soon as a line matching
+ * `marker` is observed on stdout or stderr.
+ *
+ * Use when wrapping a command that does the work we care about
+ * synchronously and then keeps running indefinitely (e.g. `expo run:ios`
+ * builds + installs + then streams Metro / app logs forever). We watch
+ * for a known "done" line, send SIGTERM, and return 0 — the child's
+ * eventual exit code is ignored because we triggered the shutdown.
+ *
+ * If the child exits on its own before the marker is seen, the actual
+ * exit code is returned so a real failure isn't silently treated as
+ * success.
+ */
+export async function spawnPrefixedUntilMarker(
+  cmd: string,
+  args: string[],
+  cwd: string,
+  prefix: string,
+  marker: RegExp,
+  extraEnv: Record<string, string> = {},
+): Promise<number> {
+  let child: Deno.ChildProcess;
+  try {
+    child = new Deno.Command(cmd, {
+      args,
+      cwd,
+      stdin: 'null',
+      stdout: 'piped',
+      stderr: 'piped',
+      env: extraEnv,
+    }).spawn();
+  } catch {
+    return 127;
+  }
+
+  const enc = new TextEncoder();
+  const dec = new TextDecoder();
+  let killedOnMarker = false;
+
+  const pump = async (stream: ReadableStream<Uint8Array>): Promise<void> => {
+    let carry = '';
+    for await (const chunk of stream) {
+      const text = carry + dec.decode(chunk, { stream: true });
+      const lines = text.split('\n');
+      carry = lines.pop() ?? '';
+      for (const line of lines) {
+        await Deno.stdout.write(enc.encode(`${prefix}${line}\n`));
+        if (!killedOnMarker && marker.test(line)) {
+          killedOnMarker = true;
+          try {
+            child.kill('SIGTERM');
+          } catch { /* already gone */ }
+        }
+      }
+    }
+    if (carry) {
+      await Deno.stdout.write(enc.encode(prefix + carry + '\n'));
+    }
+  };
+
+  // Pumps may keep going after kill while the pipe drains; that's fine,
+  // we still await both before returning so logs aren't truncated.
+  const [{ code }] = await Promise.all([
+    child.status,
+    pump(child.stdout).catch(() => {}),
+    pump(child.stderr).catch(() => {}),
+  ]);
+  // If we triggered the shutdown ourselves, treat it as success — the
+  // command did what we asked before we stopped it. Otherwise surface
+  // the real exit code (the child died on its own = real failure).
+  return killedOnMarker ? 0 : code;
+}
+
 async function spawnPrefixedInternal(
   cmd: string,
   args: string[],
