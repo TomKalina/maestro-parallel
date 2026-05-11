@@ -3,7 +3,7 @@
 import { join } from '@std/path';
 import { type BuildMode, promptBuildMode } from './buildMode.ts';
 import { type MaestroParallelConfig, resolveConfig } from './config.ts';
-import { detectExpoDefaults, expoNativeDefaultHooks } from './defaultBuild.ts';
+import { buildDefaultHooks } from './defaultBuild.ts';
 import { detectBundleId, detectFlowsDir } from './detect.ts';
 import { detectBrokenAndroidDevices, discoverDevices } from './devices.ts';
 import { mergeJunit, summarize } from './junit.ts';
@@ -101,25 +101,24 @@ export async function runMaestroParallel(
   // runner reuse-installs the resulting .apk / .app on the rest.
   // Fill in defaults per platform — if the user already wired up one
   // platform but not the other, only the missing one gets the auto-hook.
+  // Strategy is determined by `buildDefaultHooks`: it prefers an EAS
+  // local build (when a matching `e2e-test` / `e2e` / `preview` profile
+  // exists in `eas.json`) and falls back to `expo run:*` for plain Expo
+  // projects.
   if (!augmented.build?.android || !augmented.build?.ios) {
-    const expoDefaults = await detectExpoDefaults(cwd);
-    if (expoDefaults) {
-      const hooks = expoNativeDefaultHooks(expoDefaults);
+    const defaults = await buildDefaultHooks(cwd);
+    if (defaults) {
       const filled: string[] = [];
       if (!augmented.build?.android) {
-        augmented.build = { ...augmented.build, android: hooks.android };
+        augmented.build = { ...augmented.build, android: defaults.hooks.android };
         filled.push('android');
       }
       if (!augmented.build?.ios) {
-        augmented.build = { ...augmented.build, ios: hooks.ios };
+        augmented.build = { ...augmented.build, ios: defaults.hooks.ios };
         filled.push('ios');
       }
       if (filled.length > 0) {
-        log(
-          `${C.dim}default build: ${expoDefaults.packageManager} expo run:* (Release / release) for ${
-            filled.join(' + ')
-          }${C.reset}`,
-        );
+        log(`${C.dim}default build: ${defaults.description} for ${filled.join(' + ')}${C.reset}`);
       }
     }
   }
