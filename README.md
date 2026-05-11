@@ -19,8 +19,8 @@ parallel. Zero config in an Expo / React Native project — release build, insta
 
 **Release build & install**
 
-- Asks once at run start: "Build a release artifact now? [Y/n]". `Y` (default) builds via your
-  configured hook; `n` runs against the build already installed on each device.
+- Builds a release artifact via the configured hook on every run (or `--skip-build` to reuse the
+  installed app). No prompt — Rock / EAS fingerprint-cache the build so the repeat cost is seconds.
 - For Expo projects, auto-injects a default hook that runs
   `pnpm | yarn | npm exec expo run:ios --configuration Release` /
   `expo run:android --variant release` (whichever package manager you use) — the canonical local
@@ -69,7 +69,7 @@ parallel. Zero config in an Expo / React Native project — release build, insta
 
 **CLI ergonomics**
 
-- Zero config: drop into an Expo project, run `maestro-parallel`, answer one Y/N prompt.
+- Zero config: drop into an Expo project, run `maestro-parallel`, watch it build + run flows.
 - Coloured per-device prefix on every log line so parallel output stays scannable
   (`[ios:iPhone 17 ]`, `[and:Pixel 8]`).
 - Helper subcommand: `maestro-parallel setup-ios-sim` runs the AutoFill / keychain / stay-awake
@@ -114,16 +114,15 @@ deno install -g -A -f -n maestro-parallel \
 The wrapper installed under `~/.deno/bin/maestro-parallel` re-reads the source tree on every run, so
 edits show up immediately. Reinstall only if you move the checkout or change `deno.json`.
 
-That's it. The CLI discovers your devices, asks which to use, asks whether to build a release
-artifact, runs your flows in parallel, prints pass/fail.
+That's it. The CLI discovers your devices, asks which to use, auto-detects the right build strategy,
+builds a release artifact (or hits the build cache), and runs your flows in parallel.
 
 If only one device is connected, it skips the picker and just runs.
 
 ### Common variants
 
 ```bash
-maestro-parallel                          # auto: .maestro/ folder, ask whether to build
-maestro-parallel --release                # build release, then run flows (recommended for CI)
+maestro-parallel                          # auto: .maestro/ folder, build release (or cache hit)
 maestro-parallel --skip-build             # don't build; use what's installed
 maestro-parallel ./e2e/login.yaml         # specific flow
 maestro-parallel --all                    # every device, no picker
@@ -132,22 +131,19 @@ maestro-parallel setup-ios-sim            # one-off: disable AutoFill on all boo
 
 ## Build mode
 
-On every run, after the device picker, the CLI asks:
-
-```
-Build a release artifact now? [Y/n — n skips build, uses app already on each device]
-```
-
 There are two modes:
 
-- **release** — invoke your `build.*` hook to produce a real production-style artifact (release
-  variant / Release config / EAS profile), reuse-install it on every device in each platform group,
-  then run flows. The JS bundle is baked in, the app launches straight into its real UI — no
-  `expo-dev-launcher` picker, no `expo-dev-menu` onboarding overlay, no Metro to disconnect, no Fast
-  Refresh races. This is the default in non-TTY environments (CI) and the recommended answer for
-  local runs too.
-- **skip** — don't build or install; run flows against whatever is already on each device. Useful
-  for iterating on flow YAML against a stable build.
+- **release** (default whenever a build hook is configured) — invokes your `build.*` hook to produce
+  a real production-style artifact (release variant / Release config / EAS profile / Rock cached
+  artifact), reuse-installs it on every device in each platform group, then runs flows. The JS
+  bundle is baked in, the app launches straight into its real UI — no `expo-dev-launcher` picker, no
+  `expo-dev-menu` onboarding overlay, no Metro to disconnect, no Fast Refresh races.
+- **skip** (`--skip-build`) — don't build or install; run flows against whatever is already on each
+  device. Useful for iterating on flow YAML against a stable build.
+
+There used to be an interactive `[Y/n]` prompt at the start, but with Rock / EAS fingerprint-
+caching the build the prompt was pure friction — cache hits run in seconds and cache misses are the
+rebuild you'd have to do anyway. Always-on release is the default now.
 
 Dev / dev-client builds are **intentionally not supported**. They're structurally flaky for E2E
 (dev-launcher picker, dev-menu onboarding overlay, Fast Refresh races, `adb reverse` decay, Metro

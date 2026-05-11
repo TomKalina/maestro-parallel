@@ -1,7 +1,7 @@
 // Top-level orchestration. Used by both the CLI and library consumers.
 
 import { join } from '@std/path';
-import { type BuildMode, promptBuildMode } from './buildMode.ts';
+import type { BuildMode } from './buildMode.ts';
 import { type MaestroParallelConfig, resolveConfig } from './config.ts';
 import { buildDefaultHooks } from './defaultBuild.ts';
 import { detectBundleId, detectFlowsDir } from './detect.ts';
@@ -133,16 +133,15 @@ export async function runMaestroParallel(
 
   // Resolve the build mode. Source priority:
   //   1. RunOptions.buildMode (CLI flag forwarded by cli.ts)
-  //   2. options.skipBuild (legacy --skip-build flag)
+  //   2. options.skipBuild (--skip-build flag)
   //   3. resolved.buildMode (from config file)
-  //   4. Interactive prompt (TTY) / 'release' (non-TTY)
+  //   4. 'release' when build hooks exist, 'skip' otherwise.
   //
-  // Only two modes exist: `release` (build a real production-style
-  // artifact and run flows against it) and `skip` (use the app already
-  // installed on each device). Dev / dev-client builds are intentionally
-  // unsupported — they are structurally flaky for E2E and the workarounds
-  // (preflight flows, Metro forwards, deep links) move the failure mode
-  // around without removing it. Build a release artifact.
+  // We never prompt anymore — Rock / EAS already fingerprint-cache the
+  // build, so always-on release is the right default. Cache hits run in
+  // seconds; cache misses are the rebuild you'd have to do either way.
+  // Use --skip-build to explicitly run flows against the already-
+  // installed app.
   const haveBuildHooks = !!(resolved.build?.android || resolved.build?.ios);
   let buildMode: BuildMode;
   if (options.buildMode) {
@@ -152,20 +151,14 @@ export async function runMaestroParallel(
   } else if (resolved.buildMode) {
     buildMode = resolved.buildMode;
   } else if (!haveBuildHooks) {
-    // No config file or config without `build.*` hooks → there is nothing
-    // to build. Skip the prompt entirely and proceed against the
-    // already-installed app. Loud log so the user notices.
     log(
       `${C.yellow}no build.android / build.ios hooks configured — skipping build & install. Add a config to enable release builds (see examples/expo.config.ts).${C.reset}`,
     );
     buildMode = 'skip';
   } else {
-    buildMode = promptBuildMode();
+    buildMode = 'release';
   }
   if (buildMode === 'release' && !haveBuildHooks) {
-    // Belt-and-braces: if release was selected via CLI/config but there
-    // are no hooks, fail loudly rather than silently running flows
-    // against a stale app the user wasn't expecting.
     fatal(
       'release build requested, but no build.android / build.ios hooks are configured. Add a build hook in maestroparallel.config.ts (see examples/expo.config.ts or examples/eas-local.config.ts), or pass --skip-build to run flows against the already-installed app.',
     );

@@ -30,11 +30,13 @@ Options:
                         With no config and no [path], defaults to .maestro/.
       --all             Run on every discovered device (skip the picker).
       --release         Build a release artifact via the configured build
-                        hook, then run flows against it. Recommended (and
-                        the default when stdin is not a TTY).
-      --skip-build      Don't build or install; use whatever is already on
-                        each device. Without --release or --skip-build the
-                        runner prompts interactively.
+                        hook, then run flows against it. This is the
+                        default whenever a build hook is configured —
+                        Rock / EAS fingerprint-cache the build so the
+                        repeat-run cost is seconds.
+      --skip-build      Don't build or install; use whatever is already
+                        on each device. Useful for iterating on flow YAML
+                        against a stable build.
       --skip-clear      Skip clearing app data before tests.
       --cwd <path>      Project root (default: current directory).
       --apple-team-id <ID>
@@ -46,11 +48,12 @@ Options:
   -v, --version         Show version.
 
 Examples:
-  # Zero-config: ask interactively, run flows from .maestro/
+  # Zero-config: auto-detect build hook (Rock > EAS > expo run:*), build
+  # release, run flows from .maestro/
   maestro-parallel
 
-  # CI: skip the prompt, build release, run on every device
-  maestro-parallel --release --all
+  # CI: build release on every connected device
+  maestro-parallel --all
 
   # Re-run flows against an already-installed build
   maestro-parallel --skip-build .maestro/login_flow.yaml
