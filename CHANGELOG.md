@@ -15,8 +15,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Release` / `eas build --profile <p> --local` /
   `expo run:* --configuration
   Release`) and reuse-installs on the rest of the group.
-- **Rock fingerprint cache integration** — cache-hit repeat builds run in seconds instead of
-  minutes.
+- **[Rock](https://github.com/callstackincubator/rock) fingerprint cache integration** — cache-hit
+  repeat builds run in seconds instead of minutes.
 - **iOS simulator auto-preflight** before every run on every selected sim: disable AutoFill (both
   `com.apple.preferences.password.RemoteUI.SimulatorBundleSettings` and
   `com.apple.AutoFillFramework`), reset the keychain, set `SBIdleTimerDisabled` to keep the screen

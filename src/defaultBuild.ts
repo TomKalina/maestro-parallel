@@ -1,6 +1,7 @@
 // Auto-detected default build hooks. Plug in when the user has not
 // supplied their own `build.android` / `build.ios`. Strategies in
-// priority order: Rock > EAS local build > `expo run:*`.
+// priority order: Rock (https://github.com/callstackincubator/rock) >
+// EAS local build > `expo run:*`.
 //
 // Each strategy boils down to the same three steps:
 //   1. spawn a release-build command

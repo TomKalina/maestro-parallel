@@ -33,12 +33,12 @@ maestro-parallel setup-ios-sim                # one-off sim setup (also runs aut
 
 When no `build.*` is configured, the runner picks the first strategy that fits:
 
-| Trigger in `cwd`                                                     | Strategy       | Command                                                                                      |
-| -------------------------------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------- |
-| `rock.config.{js,ts,mjs,mts,cjs,cts}`                                | **Rock**       | `<pm> exec rock run:<platform> --configuration Release` (fingerprint cache → seconds on hit) |
-| `eas.json` with profile `e2e-test` / `e2e` / `e2e-tests` / `preview` | **EAS local**  | `<pm> exec eas build --profile <p> --platform <p> --local`                                   |
-| `expo` dep + `app.config.{ts,js}` or `app.json`                      | **expo run:**  | `<pm> expo run:ios --configuration Release` / `--variant release`                            |
-| _(none)_                                                             | **skip build** | use whatever is already installed                                                            |
+| Trigger in `cwd`                                                     | Strategy         | Command                                                                                      |
+| -------------------------------------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------- |
+| `rock.config.{js,ts,mjs,mts,cjs,cts}`                                | **[Rock][rock]** | `<pm> exec rock run:<platform> --configuration Release` (fingerprint cache → seconds on hit) |
+| `eas.json` with profile `e2e-test` / `e2e` / `e2e-tests` / `preview` | **EAS local**    | `<pm> exec eas build --profile <p> --platform <p> --local`                                   |
+| `expo` dep + `app.config.{ts,js}` or `app.json`                      | **expo run:**    | `<pm> expo run:ios --configuration Release` / `--variant release`                            |
+| _(none)_                                                             | **skip build**   | use whatever is already installed                                                            |
 
 `<pm>` is detected from the lockfile (pnpm > yarn > npm).
 
@@ -157,3 +157,5 @@ Not promises — directions. PRs welcome.
 ## License
 
 [Apache-2.0](./LICENSE)
+
+[rock]: https://github.com/callstackincubator/rock
