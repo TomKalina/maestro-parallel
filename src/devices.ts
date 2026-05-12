@@ -112,13 +112,18 @@ async function listIosPhysical(): Promise<Device[]> {
     const out: Device[] = [];
     for (const d of parsed.result?.devices ?? []) {
       if (d.hardwareProperties?.platform && d.hardwareProperties.platform !== 'iOS') continue;
-      // Accept any paired wired device. `tunnelState` is "disconnected" between
-      // active runs; Maestro re-establishes the developer tunnel on demand.
-      // Filtering on tunnelState === 'connected' would hide usable devices.
+      // Accept paired wired devices that are at least reachable. `tunnelState`:
+      //   - 'connected'    — tunnel up right now
+      //   - 'disconnected' — paired & plugged, tunnel decayed between runs
+      //                       (Maestro re-establishes on demand — keep)
+      //   - 'unavailable'  — paired previously but not currently reachable
+      //                       (USB unplugged / device asleep elsewhere — skip
+      //                        so it doesn't pollute the picker)
+      // `transportType` is `null` for unreachable phantoms.
       const cp = d.connectionProperties ?? {};
       const paired = cp.pairingState === 'paired';
-      const wired = !cp.transportType || cp.transportType === 'wired';
-      if (!paired || !wired) continue;
+      const reachable = cp.tunnelState !== 'unavailable' && cp.transportType === 'wired';
+      if (!paired || !reachable) continue;
       const id = d.hardwareProperties?.udid ?? d.identifier;
       if (!id) continue;
       out.push({
