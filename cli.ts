@@ -1,13 +1,7 @@
 #!/usr/bin/env -S deno run -A
-// CLI entry — run as `maestro-parallel`:
-//   - via JSR: `deno run -A jsr:@kaln/maestro-parallel/cli`
-//   - via npm: `npx maestro-parallel` (after dnt build & publish)
-//
-// Usage patterns:
-//   maestro-parallel                      # auto-detect .maestro/ flows
-//   maestro-parallel ./e2e/login.yaml     # explicit flow path
-//   maestro-parallel --config ./mp.config.ts
-//   maestro-parallel setup-ios-sim        # disable AutoFill on every booted sim
+// CLI entry. Run as:
+//   - JSR : deno run -A jsr:@kaln/maestro-parallel/cli
+//   - npm : npx maestro-parallel (after dnt build & publish)
 
 import { resolve } from '@std/path';
 import { parseArgs } from '@std/cli/parse-args';
@@ -27,39 +21,27 @@ Usage:
 Options:
   -c, --config <path>   Path to config file. If omitted, auto-discovers
                         maestroparallel.config.{ts,mts,js,mjs,cjs,json}.
-                        With no config and no [path], defaults to .maestro/.
       --all             Run on every discovered device (skip the picker).
-      --release         Build a release artifact via the configured build
-                        hook, then run flows against it. This is the
-                        default whenever a build hook is configured —
-                        Rock / EAS fingerprint-cache the build so the
-                        repeat-run cost is seconds.
-      --skip-build      Don't build or install; use whatever is already
-                        on each device. Useful for iterating on flow YAML
-                        against a stable build.
+      --skip-build      Don't build or install; use whatever is already on
+                        each device. Useful for iterating on flow YAML
+                        against a stable build. By default the runner
+                        invokes the auto-detected build hook (Rock > EAS
+                        > expo run:*) — fingerprint-cached, so repeat
+                        runs land in seconds.
       --skip-clear      Skip clearing app data before tests.
       --cwd <path>      Project root (default: current directory).
       --apple-team-id <ID>
                         10-character Apple Developer Team ID. REQUIRED for
-                        physical iOS — Maestro builds an on-device WebDriver
-                        and must sign it. Find in Xcode → Settings → Accounts.
-                        Also read from the MAESTRO_APPLE_TEAM_ID env var.
+                        physical iOS. Find in Xcode → Settings → Accounts,
+                        or set MAESTRO_APPLE_TEAM_ID.
   -h, --help            Show this help.
   -v, --version         Show version.
 
 Examples:
-  # Zero-config: auto-detect build hook (Rock > EAS > expo run:*), build
-  # release, run flows from .maestro/
-  maestro-parallel
-
-  # CI: build release on every connected device
-  maestro-parallel --all
-
-  # Re-run flows against an already-installed build
-  maestro-parallel --skip-build .maestro/login_flow.yaml
-
-  # With config (build hooks, bundleId for clearing app data, env vars)
-  maestro-parallel --config ./e2e.config.ts
+  maestro-parallel                                 # auto-detect, build + run flows
+  maestro-parallel --all                           # every device, no picker
+  maestro-parallel --skip-build .maestro/login.yaml  # re-run one flow, no rebuild
+  maestro-parallel --config ./e2e.config.ts        # explicit config file
 `;
 
 const VERSION = '0.1.0';
@@ -77,7 +59,7 @@ async function main(): Promise<void> {
   const args = parseArgs(Deno.args, {
     alias: { c: 'config', h: 'help', v: 'version' },
     string: ['config', 'cwd', 'apple-team-id'],
-    boolean: ['all', 'skip-build', 'skip-clear', 'release', 'help', 'version'],
+    boolean: ['all', 'skip-build', 'skip-clear', 'help', 'version'],
   });
 
   if (args.help) {
@@ -108,9 +90,6 @@ async function main(): Promise<void> {
   } else if (args.config) {
     return fatal(`Config file not found: ${args.config}`);
   } else {
-    // Zero-config mode. Use sane defaults — flowsArg or .maestro/. Without
-    // a config there are no build hooks, so the build step is skipped
-    // (the runner re-checks this and logs accordingly).
     config = defineConfig({});
     log(`${C.dim}no config file found; running with defaults${C.reset}`);
   }
@@ -123,9 +102,7 @@ async function main(): Promise<void> {
     config = { ...config, flowsDir: flowsArg };
   }
 
-  // Source priority for the Apple Developer Team ID: CLI flag > config file >
-  // MAESTRO_APPLE_TEAM_ID env var. Env var is the recommended steady-state
-  // setup so the tool Just Works on every iPhone run.
+  // Apple Team ID source priority: CLI flag > config file > env var.
   const teamIdFromCli = args['apple-team-id'] as string | undefined;
   const teamIdFromEnv = Deno.env.get('MAESTRO_APPLE_TEAM_ID');
   const teamId = teamIdFromCli ?? config.appleTeamId ?? teamIdFromEnv;
@@ -133,17 +110,11 @@ async function main(): Promise<void> {
     config = { ...config, appleTeamId: teamId };
   }
 
-  // Build mode resolution: --skip-build > --release > prompt.
-  let buildMode: 'release' | 'skip' | undefined;
-  if (args['skip-build']) buildMode = 'skip';
-  else if (args.release) buildMode = 'release';
-
   const code = await runMaestroParallel(config, {
     cwd,
     allDevices: args.all as boolean | undefined,
     skipBuild: args['skip-build'] as boolean | undefined,
     skipClear: args['skip-clear'] as boolean | undefined,
-    buildMode,
   });
   Deno.exit(code);
 }
