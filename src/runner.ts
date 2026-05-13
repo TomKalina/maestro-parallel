@@ -154,6 +154,19 @@ export async function runDevice(
     if (r.code === 0) {
       log(`${prefix}${C.dim}launched ${config.bundleId} on android${C.reset}`);
     }
+  } else if (isIosPhysical && config.bundleId) {
+    const r = await run('xcrun', [
+      'devicectl',
+      'device',
+      'process',
+      'launch',
+      '--device',
+      d.id,
+      config.bundleId,
+    ]);
+    if (r.code === 0) {
+      log(`${prefix}${C.dim}launched ${config.bundleId} on ${d.name}${C.reset}`);
+    }
   }
 
   // The CoreDevice tunnel decays ~10 s after the last `devicectl` call. For
