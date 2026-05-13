@@ -144,15 +144,21 @@ export async function spawnPrefixedUntilMarker(
 
   // Pumps may keep going after kill while the pipe drains; that's fine,
   // we still await both before returning so logs aren't truncated.
-  const [{ code }] = await Promise.all([
+  const [status] = await Promise.all([
     child.status,
     pump(child.stdout).catch(() => {}),
     pump(child.stderr).catch(() => {}),
   ]);
-  // If we triggered the shutdown ourselves, treat it as success — the
-  // command did what we asked before we stopped it. Otherwise surface
-  // the real exit code (the child died on its own = real failure).
-  return killedOnMarker ? 0 : code;
+  if (!killedOnMarker) {
+    // Child exited on its own — return its real code.
+    return status.code;
+  }
+  // We sent SIGTERM. Treat a clean SIGTERM exit as success (= marker
+  // fired, work done). Anything else means the child failed for an
+  // unrelated reason AFTER the marker — surface that exit code so the
+  // caller doesn't quietly proceed with a broken artifact.
+  if (status.signal === 'SIGTERM') return 0;
+  return status.code;
 }
 
 async function spawnPrefixedInternal(
