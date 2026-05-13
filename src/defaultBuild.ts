@@ -236,6 +236,8 @@ interface ReleaseHookSpec {
   /** Optionally install the artifact on `ctx.device`. Default: rely on
    *  the runner's reuse-install for the rest of the group. */
   installFirst?: (ctx: BuildContext, artifactPath: string) => Promise<number>;
+  /** Extra env merged into the build child process. */
+  env?: Record<string, string>;
 }
 
 function createReleaseHook(spec: ReleaseHookSpec): PlatformBuildHooks {
@@ -243,9 +245,10 @@ function createReleaseHook(spec: ReleaseHookSpec): PlatformBuildHooks {
     buildAndInstallFirst: async (ctx): Promise<ResolvedArtifact | null> => {
       const [exe, args] = spec.argv(ctx);
       ctx.log(`${C.dim}$ ${exe} ${args.join(' ')}${C.reset}`);
+      const env = spec.env ?? {};
       const code = spec.killMarker
-        ? await spawnPrefixedUntilMarker(exe, args, ctx.cwd, '', spec.killMarker)
-        : await spawnPrefixed(exe, args, ctx.cwd, '');
+        ? await spawnPrefixedUntilMarker(exe, args, ctx.cwd, '', spec.killMarker, env)
+        : await spawnPrefixed(exe, args, ctx.cwd, '', env);
       if (code !== 0) {
         ctx.log(`${C.red}${spec.label} failed (exit ${code})${C.reset}`);
         return null;
@@ -284,7 +287,10 @@ async function ensureFile(path: string): Promise<string | null> {
 
 // --- per-strategy hooks ------------------------------------------------------
 
-export function rockDefaultHooks(d: DetectedRockDefaults): {
+export function rockDefaultHooks(
+  d: DetectedRockDefaults,
+  env: Record<string, string> = {},
+): {
   android: PlatformBuildHooks;
   ios: PlatformBuildHooks;
 } {
@@ -301,6 +307,7 @@ export function rockDefaultHooks(d: DetectedRockDefaults): {
         ]),
       killMarker: ROCK_RUN_DONE_MARKER,
       findArtifact: (ctx) => ensureFile(ANDROID_RELEASE_APK(ctx.cwd)),
+      env,
     }),
     ios: createReleaseHook({
       label: 'rock run:ios',
@@ -316,11 +323,15 @@ export function rockDefaultHooks(d: DetectedRockDefaults): {
         ]),
       killMarker: ROCK_RUN_DONE_MARKER,
       findArtifact: (ctx) => findIosApp(ctx.cwd, ctx.device.kind),
+      env,
     }),
   };
 }
 
-export function easDefaultHooks(d: DetectedEasDefaults): {
+export function easDefaultHooks(
+  d: DetectedEasDefaults,
+  env: Record<string, string> = {},
+): {
   android: PlatformBuildHooks;
   ios: PlatformBuildHooks;
 } {
@@ -340,6 +351,7 @@ export function easDefaultHooks(d: DetectedEasDefaults): {
       findArtifact: (ctx) => newestFileMatching(ctx.cwd, (n) => n.endsWith('.apk')),
       installFirst: async (ctx, apk) =>
         (await run('adb', ['-s', ctx.device.id, 'install', '-r', apk])).code,
+      env,
     }),
     ios: createReleaseHook({
       label: 'eas build ios',
@@ -359,11 +371,15 @@ export function easDefaultHooks(d: DetectedEasDefaults): {
         );
         return 0;
       },
+      env,
     }),
   };
 }
 
-export function expoNativeDefaultHooks(d: DetectedExpoDefaults): {
+export function expoNativeDefaultHooks(
+  d: DetectedExpoDefaults,
+  env: Record<string, string> = {},
+): {
   android: PlatformBuildHooks;
   ios: PlatformBuildHooks;
 } {
@@ -380,6 +396,7 @@ export function expoNativeDefaultHooks(d: DetectedExpoDefaults): {
         ]),
       killMarker: EXPO_RUN_DONE_MARKER,
       findArtifact: (ctx) => ensureFile(ANDROID_RELEASE_APK(ctx.cwd)),
+      env,
     }),
     ios: createReleaseHook({
       label: 'expo run:ios',
@@ -393,6 +410,7 @@ export function expoNativeDefaultHooks(d: DetectedExpoDefaults): {
         ]),
       killMarker: EXPO_RUN_DONE_MARKER,
       findArtifact: (ctx) => findIosApp(ctx.cwd, ctx.device.kind),
+      env,
     }),
   };
 }
@@ -404,6 +422,7 @@ export function expoNativeDefaultHooks(d: DetectedExpoDefaults): {
 export async function buildDefaultHooks(
   cwd: string,
   strategy: BuildStrategy = 'auto',
+  env: Record<string, string> = {},
 ): Promise<
   | { description: string; hooks: { android: PlatformBuildHooks; ios: PlatformBuildHooks } }
   | null
@@ -413,17 +432,17 @@ export async function buildDefaultHooks(
   if (d.kind === 'rock') {
     return {
       description: `Rock (rock run:*, Release) via ${d.packageManager}`,
-      hooks: rockDefaultHooks(d),
+      hooks: rockDefaultHooks(d, env),
     };
   }
   if (d.kind === 'eas') {
     return {
       description: `EAS local build, profile '${d.profile}' (${d.packageManager})`,
-      hooks: easDefaultHooks(d),
+      hooks: easDefaultHooks(d, env),
     };
   }
   return {
     description: `expo run:* (Release / release) via ${d.packageManager}`,
-    hooks: expoNativeDefaultHooks(d),
+    hooks: expoNativeDefaultHooks(d, env),
   };
 }
