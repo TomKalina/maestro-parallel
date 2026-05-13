@@ -77,7 +77,9 @@ export async function runMaestroParallel(
   options: RunOptions = {},
 ): Promise<number> {
   const cwd = options.cwd ?? Deno.cwd();
-  Deno.chdir(cwd);
+  // Do not Deno.chdir(cwd): mutating process-wide cwd breaks repeat /
+  // concurrent calls from `index.ts`. All path resolution uses join(cwd, …)
+  // and every spawn that needs a working directory passes it explicitly.
 
   // Fill in any unspecified fields by sniffing the project. Anything the
   // user (or a CLI flag) already set wins — auto-detect is fallback only.
