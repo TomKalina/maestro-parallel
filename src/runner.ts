@@ -27,6 +27,21 @@ async function isAppInstalled(d: Device, bundleId: string): Promise<boolean | nu
   return null;
 }
 
+function syntheticJunit(d: Device, message: string): string {
+  const esc = (s: string): string =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const suite = `${d.platform}-${d.name}`;
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="${esc(suite)}" tests="1" failures="1" errors="0" skipped="0">
+    <testcase name="app-installed" classname="maestro-parallel">
+      <failure type="AppNotInstalled" message="${esc(message)}"/>
+    </testcase>
+  </testsuite>
+</testsuites>
+`;
+}
+
 function envFlags(extraEnv: Record<string, string>): string[] {
   const out: string[] = [];
   for (const [k, v] of Object.entries(extraEnv)) {
@@ -122,9 +137,11 @@ export async function runDevice(
   if (config.bundleId) {
     const installed = await isAppInstalled(d, config.bundleId);
     if (installed === false) {
-      log(
-        `${prefix}${C.red}${config.bundleId} not installed; skipping Maestro run on this device. Build a release artifact or pre-install the app.${C.reset}`,
-      );
+      const msg = `${config.bundleId} not installed; skipping Maestro run on this device. Build a release artifact or pre-install the app.`;
+      log(`${prefix}${C.red}${msg}${C.reset}`);
+      // Write a synthetic JUnit so the merged report and CI parsers
+      // see this as a failure with a clear cause, not a silent gap.
+      await Deno.writeTextFile(join(outDir, 'report.xml'), syntheticJunit(d, msg));
       return { device: d, exitCode: 1, outDir };
     }
   }
