@@ -286,30 +286,32 @@ export async function runMaestroParallel(
   const iosDevices = chosen.filter((d) => d.platform === 'ios');
   const results: RunResult[] = [];
 
-  // Stagger consecutive launches across BOTH platforms — Maestro 2.5.x
-  // collides on its per-second session-log directory when two processes
-  // start in the same wall-clock second. A shared counter ensures the very
-  // first Android and the very first iOS process also get spaced.
+  // Stagger applies ONLY within a parallel batch. Maestro 2.5.x collides
+  // on its per-second session-log directory when two processes start in
+  // the same wall-clock second, so siblings in a Promise.all need to be
+  // spaced. Sequential queues already have a natural gap (next starts
+  // after previous finishes), so they don't need it.
   //
-  // Delay is CUMULATIVE: i=0 → 0 ms, i=1 → stagger, i=2 → 2*stagger, …
-  // Otherwise all parallel callers would await the same fixed timeout and
-  // land in the same second together.
+  // Delay is CUMULATIVE within a batch: i=0 → 0 ms, i=1 → stagger,
+  // i=2 → 2*stagger, … Otherwise parallel callers all await the same
+  // fixed timeout and land in the same second together.
   const stagger = resolved.processStartStaggerMs;
-  let staggerIdx = 0;
-  const launchStaggered = async <T>(fn: () => Promise<T>): Promise<T> => {
-    const i = staggerIdx++;
-    if (i > 0 && stagger > 0) {
-      await new Promise<void>((r) => setTimeout(r, stagger * i));
-    }
-    return await fn();
+  const makeStagger = () => {
+    let idx = 0;
+    return async <T>(fn: () => Promise<T>): Promise<T> => {
+      const i = idx++;
+      if (i > 0 && stagger > 0) {
+        await new Promise<void>((r) => setTimeout(r, stagger * i));
+      }
+      return await fn();
+    };
   };
 
-  // Android: parallel processes (staggered). Maestro 2.5+ fixed the dadb host
-  // port race so multiple Maestro processes are safe; only the log-dir race
-  // remains and the stagger handles it.
+  // Android: parallel processes, own stagger counter.
+  const androidStagger = makeStagger();
   const androidPromise = Promise.all(
     androidDevices.map((d) =>
-      launchStaggered(() => runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved)).then(
+      androidStagger(() => runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved)).then(
         (r) => {
           results.push(r);
         },
@@ -325,17 +327,15 @@ export async function runMaestroParallel(
     if (resolved.iosShardAll) {
       const shardConfig = await makeShardConfig(cwd, resolved.maestroConfigPath, outBase);
       const color = colorOf(iosDevices[0]!);
-      const group = await launchStaggered(() =>
-        runShardGroup(
-          'ios',
-          iosDevices,
-          color,
-          prefixWidth,
-          cwd,
-          outBase,
-          shardConfig,
-          resolved,
-        )
+      const group = await runShardGroup(
+        'ios',
+        iosDevices,
+        color,
+        prefixWidth,
+        cwd,
+        outBase,
+        shardConfig,
+        resolved,
       );
       for (const d of iosDevices) {
         results.push({ device: d, exitCode: group.exitCode, outDir: group.outDir });
@@ -343,17 +343,18 @@ export async function runMaestroParallel(
       return;
     }
     if (resolved.iosSequential) {
+      // Sequential: previous finishes before next starts — no stagger needed.
       for (const d of iosDevices) {
-        const r = await launchStaggered(() =>
-          runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved)
-        );
+        const r = await runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved);
         results.push(r);
       }
       return;
     }
+    // Parallel iOS: own stagger counter, independent of Android's.
+    const iosStagger = makeStagger();
     await Promise.all(
       iosDevices.map((d) =>
-        launchStaggered(() => runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved)).then(
+        iosStagger(() => runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved)).then(
           (r) => {
             results.push(r);
           },
