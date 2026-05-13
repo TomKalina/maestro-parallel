@@ -24,9 +24,10 @@ const ROCK_CONFIG_EXTENSIONS = ['mjs', 'mts', 'js', 'ts', 'cjs', 'cts'] as const
 
 // `rock run:*` and `expo run:*` build + install + then stream Metro / app
 // logs indefinitely. Kill after the "Opening on <device>" line so the
-// runner can proceed; "Installing" / "Build cache hit" are extra Rock
-// signals that the work-we-care-about is already done.
-const ROCK_RUN_DONE_MARKER = /^›\s*Opening on |^›\s*Installing |Build cache hit/i;
+// runner can proceed. `Build cache hit` / `Installing` fire BEFORE the
+// install completes on warm caches, so matching them caused the child to
+// be SIGTERMed mid-install and the device ran against a stale build.
+const ROCK_RUN_DONE_MARKER = /^›\s*Opening on /;
 const EXPO_RUN_DONE_MARKER = /^›\s*Opening on /;
 
 // --- detection ---------------------------------------------------------------
