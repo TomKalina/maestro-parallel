@@ -6,6 +6,7 @@ import { type MaestroParallelConfig, resolveConfig } from './config.ts';
 import { buildDefaultHooks } from './defaultBuild.ts';
 import { detectBundleId, detectFlowsDir } from './detect.ts';
 import { detectBrokenAndroidDevices, discoverDevices } from './devices.ts';
+import { killAllChildren } from './exec.ts';
 import { mergeJunit, summarize } from './junit.ts';
 import { pickDevices, readLastSelection, writeLastSelection } from './picker.ts';
 import { logPreflight, preflightChecks } from './preflight.ts';
@@ -267,9 +268,13 @@ export async function runMaestroParallel(
     await resolved.hooks.preTest(chosen);
   }
 
-  // Signal handler for the iOS CoreDevice tunnel keepalives. Without this,
-  // Ctrl-C would orphan the background `devicectl` processes.
+  // Signal handler for the iOS CoreDevice tunnel keepalives + every
+  // child spawned via exec.ts (maestro test, simctl install, rock run,
+  // …). Without these reaps, Ctrl-C would orphan them: keepalives keep
+  // the tunnel open, Maestro keeps holding XCTest sessions, xcodebuild
+  // keeps DerivedData locked.
   const cleanup = async (): Promise<void> => {
+    killAllChildren();
     await iosTunnels.stop();
   };
   const onSig = (): void => {

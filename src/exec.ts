@@ -7,6 +7,30 @@ export interface RunResult {
   stderr: string;
 }
 
+// Track every spawned child so the SIGINT handler in main.ts can reap
+// them. Otherwise Ctrl-C orphans Maestro / xcodebuild / adb processes
+// that hold XCTest sessions, sim resources, or DerivedData locks.
+const activeChildren = new Set<Deno.ChildProcess>();
+
+function registerChild(c: Deno.ChildProcess): void {
+  activeChildren.add(c);
+}
+function unregisterChild(c: Deno.ChildProcess): void {
+  activeChildren.delete(c);
+}
+
+/**
+ * Send SIGTERM to every currently-running child spawned via this module.
+ * Call from a signal handler before Deno.exit. Idempotent.
+ */
+export function killAllChildren(): void {
+  for (const c of activeChildren) {
+    try {
+      c.kill('SIGTERM');
+    } catch { /* already gone */ }
+  }
+}
+
 export async function run(cmd: string, args: string[]): Promise<RunResult> {
   try {
     const out = await new Deno.Command(cmd, {
@@ -116,6 +140,7 @@ export async function spawnPrefixedUntilMarker(
   } catch {
     return 127;
   }
+  registerChild(child);
 
   const enc = new TextEncoder();
   const dec = new TextDecoder();
@@ -149,6 +174,7 @@ export async function spawnPrefixedUntilMarker(
     pump(child.stdout).catch(() => {}),
     pump(child.stderr).catch(() => {}),
   ]);
+  unregisterChild(child);
   if (!killedOnMarker) {
     // Child exited on its own — return its real code.
     return status.code;
@@ -182,6 +208,7 @@ async function spawnPrefixedInternal(
   } catch {
     return 127;
   }
+  registerChild(child);
 
   const enc = new TextEncoder();
   const dec = new TextDecoder();
@@ -208,5 +235,6 @@ async function spawnPrefixedInternal(
     pump(child.stdout),
     pump(child.stderr),
   ]);
+  unregisterChild(child);
   return code;
 }
