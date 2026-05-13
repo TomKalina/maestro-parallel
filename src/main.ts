@@ -110,7 +110,7 @@ export async function runMaestroParallel(
   // exists in `eas.json`) and falls back to `expo run:*` for plain Expo
   // projects.
   if (!augmented.build?.android || !augmented.build?.ios) {
-    const defaults = await buildDefaultHooks(cwd);
+    const defaults = await buildDefaultHooks(cwd, augmented.buildStrategy ?? 'auto');
     if (defaults) {
       const filled: string[] = [];
       if (!augmented.build?.android) {
