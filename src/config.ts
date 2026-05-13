@@ -144,6 +144,22 @@ export interface MaestroParallelConfig {
    * environment without any explicit choice, the default is `release`.
    */
   buildMode?: BuildMode;
+
+  /**
+   * Force a specific auto-detect build strategy. By default mp picks the
+   * first match in priority order: `rock` > `eas` > `expo`. Use this when
+   * your project has artifacts of more than one strategy (e.g. both
+   * `rock.config.*` AND `eas.json`) and you want to pin which one wins.
+   *
+   *   - `auto`  (default): rock > eas > expo
+   *   - `rock`  : require `rock.config.*`
+   *   - `eas`   : require `eas.json` with one of `e2e-test`/`e2e`/`preview`
+   *   - `expo`  : require `expo` in package.json + an app config
+   *
+   * Has no effect when `build.android` / `build.ios` are provided
+   * explicitly — those always take precedence over auto-detect.
+   */
+  buildStrategy?: 'auto' | 'rock' | 'eas' | 'expo';
 }
 
 /** Identity helper for type-safe config in `.ts` config files. */
@@ -161,11 +177,12 @@ export type ResolvedConfig =
       | 'bundleId'
       | 'appleTeamId'
       | 'buildMode'
+      | 'buildStrategy'
     >
   >
   & Pick<
     MaestroParallelConfig,
-    'build' | 'hooks' | 'bundleId' | 'appleTeamId' | 'buildMode'
+    'build' | 'hooks' | 'bundleId' | 'appleTeamId' | 'buildMode' | 'buildStrategy'
   >
   & {
     maestroEnv: Record<string, string>;
@@ -191,6 +208,7 @@ export function resolveConfig(c: MaestroParallelConfig): ResolvedConfig {
     processStartStaggerMs: c.processStartStaggerMs ?? 2000,
     appleTeamId: c.appleTeamId,
     buildMode: c.buildMode,
+    buildStrategy: c.buildStrategy,
   };
 }
 

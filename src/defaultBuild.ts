@@ -75,24 +75,29 @@ async function detectPackageManager(cwd: string): Promise<PackageManager> {
   return 'npm';
 }
 
-export async function detectDefaultBuild(cwd: string): Promise<DetectedDefaults | null> {
-  const pm = await detectPackageManager(cwd);
+export type BuildStrategy = 'auto' | 'rock' | 'eas' | 'expo';
 
+async function tryRock(cwd: string, pm: PackageManager): Promise<DetectedRockDefaults | null> {
   for (const ext of ROCK_CONFIG_EXTENSIONS) {
     if (await fileExists(join(cwd, `rock.config.${ext}`))) {
       return { kind: 'rock', packageManager: pm };
     }
   }
+  return null;
+}
 
+async function tryEas(cwd: string, pm: PackageManager): Promise<DetectedEasDefaults | null> {
   const eas = await readJson(join(cwd, 'eas.json')) as { build?: Record<string, unknown> } | null;
-  if (eas?.build) {
-    for (const candidate of EAS_PROFILE_CANDIDATES) {
-      if (eas.build[candidate]) {
-        return { kind: 'eas', profile: candidate, packageManager: pm };
-      }
+  if (!eas?.build) return null;
+  for (const candidate of EAS_PROFILE_CANDIDATES) {
+    if (eas.build[candidate]) {
+      return { kind: 'eas', profile: candidate, packageManager: pm };
     }
   }
+  return null;
+}
 
+async function tryExpo(cwd: string, pm: PackageManager): Promise<DetectedExpoDefaults | null> {
   const pkg = await readJson(join(cwd, 'package.json')) as
     | { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
     | null;
@@ -104,6 +109,17 @@ export async function detectDefaultBuild(cwd: string): Promise<DetectedDefaults 
     (await fileExists(join(cwd, 'app.json')));
   if (!hasAppConfig) return null;
   return { kind: 'expo', packageManager: pm };
+}
+
+export async function detectDefaultBuild(
+  cwd: string,
+  strategy: BuildStrategy = 'auto',
+): Promise<DetectedDefaults | null> {
+  const pm = await detectPackageManager(cwd);
+  if (strategy === 'rock') return tryRock(cwd, pm);
+  if (strategy === 'eas') return tryEas(cwd, pm);
+  if (strategy === 'expo') return tryExpo(cwd, pm);
+  return (await tryRock(cwd, pm)) ?? (await tryEas(cwd, pm)) ?? (await tryExpo(cwd, pm));
 }
 
 // --- shared helpers ----------------------------------------------------------
@@ -385,11 +401,14 @@ export function expoNativeDefaultHooks(d: DetectedExpoDefaults): {
  * One-shot helper used by main.ts: detect the best default for `cwd`
  * and return both the hook bundle and a short human-readable summary.
  */
-export async function buildDefaultHooks(cwd: string): Promise<
+export async function buildDefaultHooks(
+  cwd: string,
+  strategy: BuildStrategy = 'auto',
+): Promise<
   | { description: string; hooks: { android: PlatformBuildHooks; ios: PlatformBuildHooks } }
   | null
 > {
-  const d = await detectDefaultBuild(cwd);
+  const d = await detectDefaultBuild(cwd, strategy);
   if (!d) return null;
   if (d.kind === 'rock') {
     return {
