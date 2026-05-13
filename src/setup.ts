@@ -266,14 +266,14 @@ export async function buildAndInstall(
         log(
           `${p}${C.yellow}physical iOS reuse-install not supported; using per-device build hook${C.reset}`,
         );
-        await hooks.buildAndInstallFirst({
+        const perDevice = await hooks.buildAndInstallFirst({
           device: d,
           group: [d],
           cwd,
           log: (line) => log(`${p}${line}`),
           mode,
         });
-        code = 0;
+        code = perDevice ? 0 : 1;
       }
       if (code !== 0) {
         // Throw instead of `Deno.exit` — the main pipeline has not yet
