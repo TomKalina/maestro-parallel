@@ -8,6 +8,7 @@ import { detectBundleId, detectFlowsDir } from './detect.ts';
 import { detectBrokenAndroidDevices, discoverDevices } from './devices.ts';
 import { mergeJunit, summarize } from './junit.ts';
 import { pickDevices, readLastSelection, writeLastSelection } from './picker.ts';
+import { logPreflight, preflightChecks } from './preflight.ts';
 import { makeShardConfig, runDevice, runShardGroup } from './runner.ts';
 import {
   buildAndInstall,
@@ -118,7 +119,7 @@ export async function runMaestroParallel(
         filled.push('ios');
       }
       if (filled.length > 0) {
-        log(`${C.dim}default build: ${defaults.description} for ${filled.join(' + ')}${C.reset}`);
+        log(`${C.bold}${C.cyan}detected build:${C.reset} ${defaults.description} ${C.dim}(for ${filled.join(' + ')})${C.reset}`);
       }
     }
   }
@@ -219,6 +220,8 @@ export async function runMaestroParallel(
   const colorOf = (d: Device): string => colorByDevice.get(d.id) ?? PALETTE[0]!;
 
   if (buildMode === 'release' && resolved.build) {
+    const issues = await preflightChecks(cwd, chosen);
+    logPreflight(issues);
     await buildAndInstall(chosen, cwd, resolved, colorOf, prefixWidth, buildMode);
   } else if (buildMode === 'skip') {
     log(`${C.dim}skip build — using whatever's already installed${C.reset}`);

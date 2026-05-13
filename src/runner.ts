@@ -13,6 +13,20 @@ function deviceSlug(d: Device): string {
   return `${d.platform}-${d.name.replace(/[^A-Za-z0-9]+/g, '_')}-${d.id.slice(0, 8)}`;
 }
 
+// `true`  = present, `false` = absent, `null` = check unsupported (we don't
+// guess: physical iOS lacks a cheap "is installed?" probe).
+async function isAppInstalled(d: Device, bundleId: string): Promise<boolean | null> {
+  if (d.platform === 'android') {
+    const r = await run('adb', ['-s', d.id, 'shell', 'pm', 'path', bundleId]);
+    return r.code === 0 && r.stdout.trim().length > 0;
+  }
+  if (d.platform === 'ios' && d.kind === 'simulator') {
+    const r = await run('xcrun', ['simctl', 'get_app_container', d.id, bundleId, 'app']);
+    return r.code === 0;
+  }
+  return null;
+}
+
 function envFlags(extraEnv: Record<string, string>): string[] {
   const out: string[] = [];
   for (const [k, v] of Object.entries(extraEnv)) {
@@ -94,15 +108,45 @@ export async function runDevice(
 
   const prefix = devicePrefix(d, color, prefixWidth);
 
-  // iOS simulator: launch the release app directly via `simctl launch` so
-  // it is in the foreground when Maestro's first step runs. Without this,
-  // flows that lack an explicit `- launchApp` step (Maestro does not auto-
-  // launch from `appId` alone) sit on the home screen and fail with
-  // "Element not found".
+  // Bail early when the app is not on the device. After a failed build the
+  // runner falls back to "tests will run against the previously-installed
+  // app" — but if no previous install exists Maestro spends 17 s per flow
+  // looking for elements that can never appear, flooding the log with
+  // identical errors. Detect this once, here, and short-circuit.
+  if (config.bundleId) {
+    const installed = await isAppInstalled(d, config.bundleId);
+    if (installed === false) {
+      log(
+        `${prefix}${C.red}${config.bundleId} not installed; skipping Maestro run on this device. Build a release artifact or pre-install the app.${C.reset}`,
+      );
+      return { device: d, exitCode: 1, outDir };
+    }
+  }
+
+  // Foreground the app before Maestro's first step. Without this, flows
+  // that lack an explicit `- launchApp` step (Maestro does not auto-launch
+  // from `appId` alone) sit on the home screen and fail with "Element not
+  // found". `monkey` is used on Android because it resolves the launcher
+  // activity itself — no need to know the activity name.
   if (d.platform === 'ios' && d.kind === 'simulator' && config.bundleId) {
     const r = await run('xcrun', ['simctl', 'launch', d.id, config.bundleId]);
     if (r.code === 0) {
       log(`${prefix}${C.dim}launched ${config.bundleId} on sim${C.reset}`);
+    }
+  } else if (d.platform === 'android' && config.bundleId) {
+    const r = await run('adb', [
+      '-s',
+      d.id,
+      'shell',
+      'monkey',
+      '-p',
+      config.bundleId,
+      '-c',
+      'android.intent.category.LAUNCHER',
+      '1',
+    ]);
+    if (r.code === 0) {
+      log(`${prefix}${C.dim}launched ${config.bundleId} on android${C.reset}`);
     }
   }
 
