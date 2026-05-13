@@ -221,9 +221,13 @@ export async function runMaestroParallel(
   );
   const colorOf = (d: Device): string => colorByDevice.get(d.id) ?? PALETTE[0]!;
 
+  // Preflight runs unconditionally — even in skip mode the iOS sim
+  // destination probe is useful (it warns about missing runtimes before
+  // Maestro fails with a confusing simctl error).
+  const issues = await preflightChecks(cwd, chosen);
+  logPreflight(issues);
+
   if (buildMode === 'release' && resolved.build) {
-    const issues = await preflightChecks(cwd, chosen);
-    logPreflight(issues);
     await buildAndInstall(chosen, cwd, resolved, colorOf, prefixWidth, buildMode);
   } else if (buildMode === 'skip') {
     log(`${C.dim}skip build — using whatever's already installed${C.reset}`);
