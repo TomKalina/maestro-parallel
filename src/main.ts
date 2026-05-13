@@ -315,7 +315,7 @@ export async function runMaestroParallel(
   const iosPromise = (async () => {
     if (iosDevices.length === 0) return;
     if (resolved.iosShardAll) {
-      const shardConfig = await makeShardConfig(cwd, resolved.maestroConfigPath);
+      const shardConfig = await makeShardConfig(cwd, resolved.maestroConfigPath, outBase);
       const color = colorOf(iosDevices[0]!);
       const group = await launchStaggered(() =>
         runShardGroup(
