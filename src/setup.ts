@@ -276,18 +276,26 @@ export async function buildAndInstall(
         code = perDevice ? 0 : 1;
       }
       if (code !== 0) {
-        // Throw instead of `Deno.exit` — the main pipeline has not yet
-        // attached its signal-cleanup handler at this point, so killing
-        // the process here would skip iOS tunnel teardown and any
-        // simulator that has been mid-install. Let the error bubble to
-        // the top-level catch in cli.ts.
         const msg = `install failed on ${d.name} (${d.id}) — exit ${code}`;
         log(`${p}${C.red}${msg}${C.reset}`);
         throw new Error(msg);
       }
       log(`${p}${C.green}installed${C.reset}`);
     });
-    await Promise.all(installs);
+    // Promise.allSettled — one failed install must not cancel the
+    // siblings (Promise.all interleaves their logs over the error path
+    // and leaves partial installs running). After all settle, throw
+    // an aggregate so the top-level catch in cli.ts sees it.
+    const settled = await Promise.allSettled(installs);
+    const failures = settled.filter((s) => s.status === 'rejected') as PromiseRejectedResult[];
+    if (failures.length > 0) {
+      const messages = failures.map((f) =>
+        f.reason instanceof Error ? f.reason.message : String(f.reason)
+      );
+      throw new Error(
+        `${failures.length}/${installs.length} install(s) failed:\n  - ${messages.join('\n  - ')}`,
+      );
+    }
   }
   log('');
 }
