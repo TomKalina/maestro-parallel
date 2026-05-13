@@ -39,7 +39,11 @@ function envFlags(extraEnv: Record<string, string>): string[] {
 // Generate a temporary Maestro config that drops `executionOrder.flowsOrder`
 // (which forces sequential mode and thus blocks `--shard-all`). The user's
 // real config.yaml stays untouched.
-export async function makeShardConfig(cwd: string, configPath: string): Promise<string | null> {
+export async function makeShardConfig(
+  cwd: string,
+  configPath: string,
+  outBase: string,
+): Promise<string | null> {
   const src = join(cwd, configPath);
   let txt: string;
   try {
@@ -63,10 +67,12 @@ export async function makeShardConfig(cwd: string, configPath: string): Promise<
     }
     out.push(line);
   }
-  const tmpDir = await Deno.makeTempDir({ prefix: 'maestro-parallel-' });
-  const tmp = join(tmpDir, 'config.yaml');
-  await Deno.writeTextFile(tmp, out.join('\n'));
-  return tmp;
+  // Write inside the run's output dir so pruneOldRuns reaps it together
+  // with the rest of the artifacts. Previously this went to $TMPDIR and
+  // was never deleted.
+  const dest = join(cwd, outBase, 'shard-config.yaml');
+  await Deno.writeTextFile(dest, out.join('\n'));
+  return dest;
 }
 
 // Run Maestro on a single device. One process per device, plain `maestro test`
