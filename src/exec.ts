@@ -20,13 +20,29 @@ export async function run(cmd: string, args: string[]): Promise<RunResult> {
       stdout: dec.decode(out.stdout),
       stderr: dec.decode(out.stderr),
     };
-  } catch {
-    return { code: 127, stdout: '', stderr: '' };
+  } catch (e) {
+    // Most often ENOENT for missing binary; log it so the user can
+    // diagnose without diffing strace. `has(cmd)` itself relies on this
+    // path returning a non-zero code, so we keep the 127 return shape.
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`\x1b[33mrun(${cmd}) threw: ${msg}\x1b[0m`);
+    return { code: 127, stdout: '', stderr: msg };
   }
 }
 
 export async function has(cmd: string): Promise<boolean> {
-  return (await run('which', [cmd])).code === 0;
+  // Suppress the stderr log from `run` — `has` is the one path where a
+  // missing binary is an expected outcome, not a problem.
+  try {
+    const out = await new Deno.Command('which', {
+      args: [cmd],
+      stdout: 'piped',
+      stderr: 'piped',
+    }).output();
+    return out.code === 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
