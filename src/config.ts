@@ -160,6 +160,18 @@ export interface MaestroParallelConfig {
    * explicitly — those always take precedence over auto-detect.
    */
   buildStrategy?: 'auto' | 'rock' | 'eas' | 'expo';
+
+  /**
+   * Extra environment variables forwarded to the auto-detected build
+   * command (Rock / EAS / expo run:*). Useful for project-specific knobs
+   * that need to be set at build time without polluting the user's shell —
+   * e.g. `SENTRY_DISABLE_AUTO_UPLOAD: 'true'` to skip the Sentry source-map
+   * upload Xcode build phase. The host environment overrides these.
+   *
+   * Has no effect on user-defined `build.{android,ios}` hooks — those
+   * control their own env when they spawn child processes.
+   */
+  buildEnv?: Record<string, string>;
 }
 
 /** Identity helper for type-safe config in `.ts` config files. */
@@ -178,11 +190,18 @@ export type ResolvedConfig =
       | 'appleTeamId'
       | 'buildMode'
       | 'buildStrategy'
+      | 'buildEnv'
     >
   >
   & Pick<
     MaestroParallelConfig,
-    'build' | 'hooks' | 'bundleId' | 'appleTeamId' | 'buildMode' | 'buildStrategy'
+    | 'build'
+    | 'hooks'
+    | 'bundleId'
+    | 'appleTeamId'
+    | 'buildMode'
+    | 'buildStrategy'
+    | 'buildEnv'
   >
   & {
     maestroEnv: Record<string, string>;
@@ -209,6 +228,7 @@ export function resolveConfig(c: MaestroParallelConfig): ResolvedConfig {
     appleTeamId: c.appleTeamId,
     buildMode: c.buildMode,
     buildStrategy: c.buildStrategy,
+    buildEnv: c.buildEnv,
   };
 }
 
