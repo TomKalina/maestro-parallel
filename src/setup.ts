@@ -197,6 +197,17 @@ export async function buildAndInstall(
     else groups.set(k, [d]);
   }
 
+  // Print plan up-front so the user sees exactly which build runs and
+  // which devices get reuse-install before spawning any heavy commands.
+  for (const [groupKey, groupDevices] of groups) {
+    const first = groupDevices[0]!;
+    const rest = groupDevices.slice(1);
+    const restList = rest.length > 0
+      ? `, reuse-install on: ${rest.map((d) => d.name).join(', ')}`
+      : '';
+    log(`${C.dim}plan ${groupKey}: build on ${first.name}${restList}${C.reset}`);
+  }
+
   for (const [groupKey, groupDevices] of groups) {
     const platform = platformOf(groupKey);
     const hooks = config.build?.[platform];
@@ -211,6 +222,7 @@ export async function buildAndInstall(
     const firstLog = (line: string): void => log(`${firstPrefix}${line}`);
 
     firstLog(`${C.bold}build & install (group: ${groupKey}, mode: ${mode})${C.reset}`);
+    const startedAt = Date.now();
     const artifact = await hooks.buildAndInstallFirst({
       device: first,
       group: groupDevices,
@@ -218,6 +230,7 @@ export async function buildAndInstall(
       log: firstLog,
       mode,
     });
+    const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
 
     if (!artifact) {
       // Hook returned null = build OR first install failed. Skip the per-
@@ -225,12 +238,12 @@ export async function buildAndInstall(
       // for 8 s each). Tests can still run against whatever's already on
       // the devices.
       firstLog(
-        `${C.yellow}build failed for ${groupKey}; skipping install on ${rest.length} other device(s). Tests will run against the previously-installed app.${C.reset}`,
+        `${C.yellow}build failed for ${groupKey} (${elapsed}s); skipping install on ${rest.length} other device(s). Tests will run against the previously-installed app — if any.${C.reset}`,
       );
       continue;
     }
 
-    firstLog(`${C.green}built & installed${C.reset}`);
+    firstLog(`${C.green}built & installed${C.reset} ${C.dim}(${elapsed}s)${C.reset}`);
 
     if (rest.length === 0) continue;
 
