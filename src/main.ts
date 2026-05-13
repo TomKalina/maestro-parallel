@@ -273,7 +273,11 @@ export async function runMaestroParallel(
     await iosTunnels.stop();
   };
   const onSig = (): void => {
-    cleanup().finally(() => Deno.exit(130));
+    // Race cleanup against a hard 3s deadline so a stuck child can't
+    // hang Ctrl-C indefinitely. The keepalive children get SIGTERM in
+    // iosTunnels.stop(); if they ignore it we just exit anyway.
+    const deadline = new Promise<void>((r) => setTimeout(r, 3000));
+    Promise.race([cleanup(), deadline]).finally(() => Deno.exit(130));
   };
   Deno.addSignalListener('SIGINT', onSig);
   Deno.addSignalListener('SIGTERM', onSig);
