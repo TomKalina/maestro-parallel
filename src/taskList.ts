@@ -171,9 +171,12 @@ export class TaskList {
 
   private redraw(): void {
     if (this.linesWritten > 0) {
-      // Cursor up to the start of our previous block, clear from there
-      // to end of screen. Works on every terminfo-compliant terminal.
-      Deno.stderr.writeSync(enc.encode(`\x1b[${this.linesWritten}A\x1b[J`));
+      // `\r` goes to column 0 first (some terminals leave the cursor
+      // mid-line after our writes), then `\x1b[NA` moves up N rows,
+      // then `\x1b[J` clears from there to end of screen. Without the
+      // CR, partial overwrite leaves the previous line's right half
+      // visible — observed as duplicated names.
+      Deno.stderr.writeSync(enc.encode(`\r\x1b[${this.linesWritten}A\x1b[J`));
     }
     this.linesWritten = 0;
     for (let i = 0; i < this.steps.length; i++) {
