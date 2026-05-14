@@ -339,6 +339,11 @@ export function rockDefaultHooks(
           ctx.device.kind === 'simulator' ? 'simulator' : 'device',
           '--device',
           ctx.device.buildTargetId,
+          // Pin DerivedData inside the project so sim + device builds
+          // share Swift modules / index / Pods front-end output rather
+          // than landing in two separate Xcode-default folders.
+          '--build-folder',
+          'ios/build',
         ]),
       killMarker: ROCK_RUN_DONE_MARKER,
       findArtifact: (ctx) => findIosApp(ctx.cwd, ctx.device.kind),
