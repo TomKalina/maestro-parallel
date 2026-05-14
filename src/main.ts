@@ -291,12 +291,9 @@ export async function runMaestroParallel(
   const failedBeforeTest = new Set<string>();
 
   if (buildMode === 'release' && resolved.build) {
-    // Mark every device as 'building' / 'waiting' upfront so the user
-    // sees all rows light up at once instead of one-by-one.
-    for (const d of chosen) {
-      tl.start(deviceIndex.get(d.id)!);
-      updateRow(d, `${C.cyan}building${C.reset}`);
-    }
+    // No pre-mark loop — setup.ts emits onDeviceState 'building' per
+    // group as it starts, so non-active groups stay 'pending' (no
+    // spinner rotation) until their turn.
     await buildAndInstall(chosen, cwd, resolved, colorOf, prefixWidth, buildMode, outBase, {
       quiet: true,
       concurrent: resolved.concurrentBuilds,
@@ -306,11 +303,10 @@ export async function runMaestroParallel(
         const i = deviceIndex.get(deviceId)!;
         switch (state) {
           case 'building': {
-            // Total row width must stay inside terminal columns or
-            // log-update miscounts wraps and stale rows pile up. Compute
-            // the available detail budget from the live console size,
-            // minus the fixed row overhead (glyph + name pad + prefix
-            // text + safety).
+            // Flip to running so the spinner glyph rotates only while
+            // this device is actively being worked on. tl.start is
+            // idempotent.
+            tl.start(i);
             const cols = (Deno.consoleSize?.()?.columns) ?? 80;
             const fixedOverhead = 3 /* glyph + 2sp */ +
               nameWidth + 2 /* "name  " */ +
@@ -335,10 +331,16 @@ export async function runMaestroParallel(
             updateRow(d, `${C.dim}waiting (queued)${C.reset}`);
             break;
           case 'installing':
+            tl.start(i);
             updateRow(d, `${C.cyan}installing${C.reset}`);
             break;
           case 'installed':
+            // Build/install for this device is done — freeze the spinner
+            // until the prepare phase flips it back to running. While
+            // other groups are still building (concurrent mode), this
+            // row sits at static ◇ instead of pretending to spin.
             updateRow(d, `${C.green}built${C.reset}${detail ? ` ${C.dim}${detail}${C.reset}` : ''}`);
+            tl.done(i);
             break;
           case 'failed':
             updateRow(d, `${C.red}failed${C.reset}${detail ? ` ${C.dim}${detail}${C.reset}` : ''}`);
