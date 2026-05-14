@@ -193,6 +193,7 @@ export async function spawnSilentWithProgress(
   logFilePath: string,
   onLine: (line: string) => void,
   extraEnv: Record<string, string> = {},
+  opts: { idleKillMs?: number } = {},
 ): Promise<number> {
   await Deno.writeTextFile(logFilePath, '');
   const file = await Deno.open(logFilePath, { append: true });
@@ -215,9 +216,41 @@ export async function spawnSilentWithProgress(
   const enc = new TextEncoder();
   const dec = new TextDecoder();
 
+  // Watchdog: if the caller asked for idle-kill, SIGTERM (then SIGKILL)
+  // the child when no output has been seen for idleKillMs. Maestro 2.5.1
+  // sometimes hangs in DebugLogStore.finalizeRun (NoSuchFileException
+  // race) after the last flow; without this, mp waits forever on the
+  // zombie.
+  const idleKillMs = opts.idleKillMs ?? 0;
+  let lastOutputAt = Date.now();
+  let watchdogTimer: number | null = null;
+  let killedByWatchdog = false;
+  const armWatchdog = (): void => {
+    if (idleKillMs <= 0) return;
+    if (watchdogTimer !== null) clearTimeout(watchdogTimer);
+    watchdogTimer = setTimeout(() => {
+      if (Date.now() - lastOutputAt < idleKillMs) {
+        armWatchdog();
+        return;
+      }
+      killedByWatchdog = true;
+      try {
+        child.kill('SIGTERM');
+      } catch { /* gone */ }
+      setTimeout(() => {
+        try {
+          child.kill('SIGKILL');
+        } catch { /* gone */ }
+      }, 5000);
+    }, idleKillMs);
+    Deno.unrefTimer(watchdogTimer);
+  };
+  armWatchdog();
+
   const pump = async (stream: ReadableStream<Uint8Array>): Promise<void> => {
     let carry = '';
     for await (const chunk of stream) {
+      lastOutputAt = Date.now();
       const text = carry + dec.decode(chunk, { stream: true });
       const lines = text.split('\n');
       carry = lines.pop() ?? '';
@@ -237,13 +270,16 @@ export async function spawnSilentWithProgress(
   };
 
   try {
-    const [{ code }] = await Promise.all([
+    const [status] = await Promise.all([
       child.status,
       pump(child.stdout).catch(() => {}),
       pump(child.stderr).catch(() => {}),
     ]);
+    if (watchdogTimer !== null) clearTimeout(watchdogTimer);
     unregisterChild(child);
-    return code;
+    // Watchdog-killed runs report as failure (137 for SIGKILL).
+    if (killedByWatchdog) return status.code !== 0 ? status.code : 137;
+    return status.code;
   } finally {
     file.close();
   }

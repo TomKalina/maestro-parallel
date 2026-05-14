@@ -80,6 +80,8 @@ export default {
 };
 ```
 
+mp also has a built-in **idle-kill watchdog** (30s of silence after any output → SIGTERM, +5 s → SIGKILL). The device's row finishes as ✗ in that case, exit code 137. Without it the whole run would block on the zombie.
+
 If it still hangs, kill the zombie:
 
 ```bash

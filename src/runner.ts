@@ -248,6 +248,9 @@ export async function runDevice(
         });
       },
       { NO_COLOR: '1' },
+      // Maestro 2.5.1 sometimes hangs in DebugLogStore.finalizeRun after
+      // the last flow. 30s of silence after any output = watchdog kill.
+      { idleKillMs: 30000 },
     );
   } else {
     log(`${prefix}${C.bold}start${C.reset} ${d.id}`);
