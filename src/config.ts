@@ -19,6 +19,12 @@ export interface BuildContext {
   log: (line: string) => void;
   /** Selected build mode. Always `release` when this hook is invoked — `skip` short-circuits earlier. */
   mode: BuildMode;
+  /**
+   * Absolute path the hook should tee its raw build output to. The default
+   * hooks write everything here and let mp render a single spinner line on
+   * stdout. Custom hooks may ignore this and stream as before.
+   */
+  buildLogPath?: string;
 }
 
 export interface ResolvedArtifact {

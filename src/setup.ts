@@ -3,6 +3,7 @@
 // rest. The build step is delegated to the user's config — we do not know
 // whether they use Expo, bare RN, native Xcode/Gradle, etc.
 
+import { join } from '@std/path';
 import type { BuildMode } from './buildMode.ts';
 import type { ResolvedConfig } from './config.ts';
 import { devicePrefix } from './devices.ts';
@@ -181,6 +182,7 @@ export async function buildAndInstall(
   colorOf: (d: Device) => string,
   prefixWidth: number,
   mode: BuildMode,
+  outBase?: string,
 ): Promise<void> {
   log('');
   log(
@@ -221,7 +223,9 @@ export async function buildAndInstall(
     const firstPrefix = devicePrefix(first, colorOf(first), prefixWidth);
     const firstLog = (line: string): void => log(`${firstPrefix}${line}`);
 
-    firstLog(`${C.bold}build & install (group: ${groupKey}, mode: ${mode})${C.reset}`);
+    const buildLogPath = outBase
+      ? join(cwd, outBase, `build-${groupKey}.log`)
+      : undefined;
     const startedAt = Date.now();
     const artifact = await hooks.buildAndInstallFirst({
       device: first,
@@ -229,6 +233,7 @@ export async function buildAndInstall(
       cwd,
       log: firstLog,
       mode,
+      buildLogPath,
     });
     const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
 
@@ -242,8 +247,6 @@ export async function buildAndInstall(
       );
       continue;
     }
-
-    firstLog(`${C.green}built & installed${C.reset} ${C.dim}(${elapsed}s)${C.reset}`);
 
     if (rest.length === 0) continue;
 

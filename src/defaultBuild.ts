@@ -12,9 +12,9 @@
 
 import { join } from '@std/path';
 import type { BuildContext, PlatformBuildHooks, ResolvedArtifact } from './config.ts';
-import { run, spawnPrefixed, spawnPrefixedUntilMarker } from './exec.ts';
+import { run, spawnToFile } from './exec.ts';
 import type { Device } from './types.ts';
-import { C } from './ui.ts';
+import { C, spinner } from './ui.ts';
 
 type PackageManager = 'pnpm' | 'yarn' | 'npm';
 type Platform = 'android' | 'ios';
@@ -251,15 +251,21 @@ function createReleaseHook(spec: ReleaseHookSpec): PlatformBuildHooks {
   return {
     buildAndInstallFirst: async (ctx): Promise<ResolvedArtifact | null> => {
       const [exe, args] = spec.argv(ctx);
-      ctx.log(`${C.dim}$ ${exe} ${args.join(' ')}${C.reset}`);
       const env = spec.env ?? {};
-      const code = spec.killMarker
-        ? await spawnPrefixedUntilMarker(exe, args, ctx.cwd, '', spec.killMarker, env)
-        : await spawnPrefixed(exe, args, ctx.cwd, '', env);
+      const logHint = ctx.buildLogPath ? `\n${C.dim}log: ${ctx.buildLogPath}${C.reset}` : '';
+      const sp = spinner(`${spec.label} on ${ctx.device.name}…`);
+      const startedAt = Date.now();
+      // If the caller didn't give us a log path, fall back to a tempfile
+      // so we still get quiet output for the spinner UX.
+      const logPath = ctx.buildLogPath ??
+        (await Deno.makeTempFile({ prefix: 'maestro-parallel-build-', suffix: '.log' }));
+      const code = await spawnToFile(exe, args, ctx.cwd, logPath, spec.killMarker, env);
+      const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       if (code !== 0) {
-        ctx.log(`${C.red}${spec.label} failed (exit ${code})${C.reset}`);
+        sp.fail(`${spec.label} failed (exit ${code}, ${elapsed}s)${logHint}`);
         return null;
       }
+      sp.stop(`${spec.label} done (${elapsed}s)`);
       const path = await spec.findArtifact(ctx);
       if (!path) {
         ctx.log(
