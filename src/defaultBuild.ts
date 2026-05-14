@@ -23,12 +23,19 @@ const EAS_PROFILE_CANDIDATES = ['e2e-test', 'e2e', 'e2e-tests', 'preview'] as co
 const ROCK_CONFIG_EXTENSIONS = ['mjs', 'mts', 'js', 'ts', 'cjs', 'cts'] as const;
 
 // `rock run:*` and `expo run:*` build + install + then stream Metro / app
-// logs indefinitely. Kill after the "Opening on <device>" line so the
+// logs indefinitely. Kill after the "Opening … on <device>" line so the
 // runner can proceed. `Build cache hit` / `Installing` fire BEFORE the
 // install completes on warm caches, so matching them caused the child to
 // be SIGTERMed mid-install and the device ran against a stale build.
-const ROCK_RUN_DONE_MARKER = /^›\s*Opening on /;
-const EXPO_RUN_DONE_MARKER = /^›\s*Opening on /;
+//
+// Two output shapes the marker has to handle:
+//   1. Plain expo / rock:   `› Opening on <device>`
+//   2. expo-dev-client:     `› Opening exp+<scheme>://...?url=... on <device>`
+//      (deep link launches Metro inside the dev client)
+// `Logs for your project` is a stable fallback — it appears right after
+// install on every code path, even when the Opening line wraps oddly.
+const ROCK_RUN_DONE_MARKER = /^›\s*Opening (?:.* )?on |^›\s*Logs for your project/;
+const EXPO_RUN_DONE_MARKER = /^›\s*Opening (?:.* )?on |^›\s*Logs for your project/;
 
 // --- detection ---------------------------------------------------------------
 
