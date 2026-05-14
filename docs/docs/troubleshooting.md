@@ -66,7 +66,7 @@ Check the build phase ran successfully. Logs are in `.maestro/output/parallel-<t
 
 ## Where is the raw Maestro output?
 
-The terminal shows an aggregated spinner with `N ✓  M ✗ · <device>: <flow>` counters. Per-device Maestro stdout/stderr is captured into `.maestro/output/parallel-<timestamp>/<platform>-<name>-<udid8>/run.log`. Build phase output goes to `<outBase>/build-<group>.log`. Tail those when you need to dig into a single failure.
+The terminal shows a listr2 checklist with a single task per phase. The Maestro task title shows running totals (`N ✓  M ✗`) and its sub-output the current device + flow. Per-device Maestro stdout/stderr is captured into `.maestro/output/parallel-<timestamp>/<platform>-<name>-<udid8>/run.log`. Build phase output goes to `<outBase>/build-<group>.log`. Tail those when you need to dig into a single failure.
 
 ## Maestro CLI hangs in shutdown (`NoSuchFileException: ~/Library/Logs/maestro/<timestamp>`)
 

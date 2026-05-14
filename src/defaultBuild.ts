@@ -253,7 +253,12 @@ function createReleaseHook(spec: ReleaseHookSpec): PlatformBuildHooks {
       const [exe, args] = spec.argv(ctx);
       const env = spec.env ?? {};
       const logHint = ctx.buildLogPath ? `\n${C.dim}log: ${ctx.buildLogPath}${C.reset}` : '';
-      const sp = spinner(`${spec.label} on ${ctx.device.name}…`);
+      // If a caller subscribed to ctx.report (Listr UI), feed status
+      // through that channel and skip the internal clack spinner —
+      // otherwise the two would fight over the cursor.
+      const useReport = !!ctx.report;
+      const sp = useReport ? null : spinner(`${spec.label} on ${ctx.device.name}…`);
+      ctx.report?.(`${spec.label} on ${ctx.device.name}…`);
       const startedAt = Date.now();
       // If the caller didn't give us a log path, fall back to a tempfile
       // so we still get quiet output for the spinner UX.
@@ -262,10 +267,12 @@ function createReleaseHook(spec: ReleaseHookSpec): PlatformBuildHooks {
       const code = await spawnToFile(exe, args, ctx.cwd, logPath, spec.killMarker, env);
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       if (code !== 0) {
-        sp.fail(`${spec.label} failed (exit ${code}, ${elapsed}s)${logHint}`);
+        if (sp) sp.fail(`${spec.label} failed (exit ${code}, ${elapsed}s)${logHint}`);
+        else ctx.report?.(`failed (exit ${code}, ${elapsed}s)`);
         return null;
       }
-      sp.stop(`${spec.label} done (${elapsed}s)`);
+      if (sp) sp.stop(`${spec.label} done (${elapsed}s)`);
+      else ctx.report?.(`done (${elapsed}s)`);
       const path = await spec.findArtifact(ctx);
       if (!path) {
         ctx.log(

@@ -21,6 +21,7 @@ import {
 } from './setup.ts';
 import { setupIosSim } from './setupIosSim.ts';
 import type { Device, RunResult } from './types.ts';
+import { Listr } from 'npm:listr2@10.2.1';
 import {
   fatal,
   info,
@@ -28,10 +29,6 @@ import {
   note,
   outro,
   PALETTE,
-  plan,
-  spinner,
-  step,
-  stepLabel,
   warn,
 } from './ui.ts';
 
@@ -231,19 +228,6 @@ export async function runMaestroParallel(
     }
   }
 
-  // Plan outline — print the steps about to run so the user sees scope
-  // up front. Skip optional steps (build, preflight when empty).
-  type StepName = 'build' | 'prepare' | 'maestro';
-  const planSteps: StepName[] = [];
-  if (buildMode === 'release' && haveBuildHooks) planSteps.push('build');
-  planSteps.push('prepare', 'maestro');
-  const planLabels: Record<StepName, string> = {
-    build: `Build & install on ${chosen.length} device${chosen.length > 1 ? 's' : ''}`,
-    prepare: 'Prepare devices',
-    maestro: `Maestro tests (${chosen.length} device${chosen.length > 1 ? 's' : ''})`,
-  };
-  plan(planSteps.map((s) => planLabels[s]));
-
   await pruneOldRuns(cwd, resolved.outputDir, resolved.keepRuns);
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -265,50 +249,141 @@ export async function runMaestroParallel(
   const issues = await preflightChecks(cwd, chosen);
   logPreflight(issues);
 
-  const stepIdx = (n: StepName) => planSteps.indexOf(n) + 1;
-  const total = planSteps.length;
+  let iosTunnels: IosTunnelHandle = { stop: () => Promise.resolve() };
+  const results: RunResult[] = [];
 
-  if (buildMode === 'release' && resolved.build) {
-    step(stepLabel(stepIdx('build'), total, 'Build & install'));
-    await buildAndInstall(chosen, cwd, resolved, colorOf, prefixWidth, buildMode, outBase);
-  } else if (buildMode === 'skip') {
-    info("skip build — using whatever's already installed");
-  }
+  // Build the Listr task list: phases visible upfront, fill in as they
+  // run. Each phase task updates its own title and output; listr2 handles
+  // ANSI redraw + non-TTY fallback for us.
+  const phases = new Listr<unknown>([
+    {
+      title: 'Build & install',
+      enabled: () => buildMode === 'release' && !!resolved.build,
+      task: async (_, task) => {
+        const report = (msg: string): void => {
+          task.output = msg;
+        };
+        await buildAndInstall(
+          chosen,
+          cwd,
+          resolved,
+          colorOf,
+          prefixWidth,
+          buildMode,
+          outBase,
+          { quiet: true, report },
+        );
+      },
+    },
+    {
+      title: 'Prepare devices',
+      task: async (_, task) => {
+        task.output = 'waking Android devices…';
+        await wakeAndroidDevices(chosen, true);
+        task.output = 'establishing iOS tunnel(s)…';
+        iosTunnels = await wakeIosPhysicalTunnels(chosen, true);
+        warnIosPhysicalAutoLock(chosen, true);
+        const iosSims = chosen.filter((d) => d.platform === 'ios' && d.kind === 'simulator');
+        if (iosSims.length > 0) {
+          task.output = `configuring ${iosSims.length} iOS sim(s)…`;
+          await Promise.all(iosSims.map((d) => setupIosSim(d.id)));
+        }
+        if (!options.skipClear && resolved.bundleId) {
+          task.output = 'clearing app state…';
+          await clearAppState(chosen, resolved.bundleId, true);
+        }
+        if (resolved.hooks?.preTest) {
+          task.output = 'running preTest hook…';
+          await resolved.hooks.preTest(chosen);
+        }
+      },
+    },
+    {
+      title: `Maestro tests (${chosen.length} device${chosen.length > 1 ? 's' : ''})`,
+      task: async (_, task) => {
+        const androidDevices = chosen.filter((d) => d.platform === 'android');
+        const iosDevices = chosen.filter((d) => d.platform === 'ios');
 
-  step(stepLabel(stepIdx('prepare'), total, 'Prepare devices'));
-  await wakeAndroidDevices(chosen);
-  const iosTunnels: IosTunnelHandle = await wakeIosPhysicalTunnels(chosen);
-  warnIosPhysicalAutoLock(chosen);
+        const stagger = resolved.processStartStaggerMs;
+        const makeStagger = () => {
+          let idx = 0;
+          return async <T>(fn: () => Promise<T>): Promise<T> => {
+            const i = idx++;
+            if (i > 0 && stagger > 0) {
+              await new Promise<void>((r) => setTimeout(r, stagger * i));
+            }
+            return await fn();
+          };
+        };
 
-  // Disable the iOS "Save Password?" / AutoFill prompt and keep the
-  // simulator's screen awake. Without this the AutoFill overlay floats
-  // above the app after any password submit and blocks Maestro's next
-  // step — the overlay is rendered by SpringBoard so the flow can't
-  // dismiss it. Sims only: physical iOS can't be configured programmatically.
-  const iosSims = chosen.filter((d) => d.platform === 'ios' && d.kind === 'simulator');
-  if (iosSims.length > 0) {
-    info(
-      `configuring ${iosSims.length} iOS sim(s): disable AutoFill, reset keychain, keep awake`,
-    );
-    await Promise.all(iosSims.map((d) => setupIosSim(d.id)));
-  }
-  const iosPhysical = chosen.filter((d) => d.platform === 'ios' && d.kind === 'usb');
-  if (iosPhysical.length > 0) {
-    warn(
-      `physical iOS (${
-        iosPhysical.map((d) => d.name).join(', ')
-      }) — disable AutoFill manually: Settings → Passwords → Password Options → AutoFill Passwords (off).`,
-    );
-  }
+        let mPass = 0;
+        let mFail = 0;
+        const baseTitle = task.title;
+        const onEvent = (e: FlowEvent): void => {
+          if (e.status === 'pass') mPass++;
+          else mFail++;
+          task.title = `${baseTitle} — ${mPass} ✓  ${mFail} ✗`;
+          task.output = `${e.device.name}: ${e.flow}`;
+        };
+        const useEvents = !resolved.iosShardAll;
 
-  // bundleId is required for the clear step; if absent we silently skip it.
-  if (!options.skipClear && resolved.bundleId) {
-    await clearAppState(chosen, resolved.bundleId);
-  }
+        const androidStagger = makeStagger();
+        const androidPromise = Promise.all(
+          androidDevices.map((d) =>
+            androidStagger(() =>
+              runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved, useEvents ? onEvent : undefined)
+            ).then((r) => {
+              results.push(r);
+            })
+          ),
+        );
 
-  if (resolved.hooks?.preTest) {
-    await resolved.hooks.preTest(chosen);
-  }
+        const iosPromise = (async () => {
+          if (iosDevices.length === 0) return;
+          if (resolved.iosShardAll) {
+            const shardConfig = await makeShardConfig(cwd, resolved.maestroConfigPath, outBase);
+            const color = colorOf(iosDevices[0]!);
+            const group = await runShardGroup(
+              'ios',
+              iosDevices,
+              color,
+              prefixWidth,
+              cwd,
+              outBase,
+              shardConfig,
+              resolved,
+            );
+            for (const d of iosDevices) {
+              results.push({ device: d, exitCode: group.exitCode, outDir: group.outDir });
+            }
+            return;
+          }
+          if (resolved.iosSequential) {
+            for (const d of iosDevices) {
+              const r = await runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved, onEvent);
+              results.push(r);
+            }
+            return;
+          }
+          const iosStagger = makeStagger();
+          await Promise.all(
+            iosDevices.map((d) =>
+              iosStagger(() =>
+                runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved, onEvent)
+              ).then((r) => {
+                results.push(r);
+              })
+            ),
+          );
+        })();
+
+        await Promise.all([androidPromise, iosPromise]);
+      },
+    },
+  ], {
+    concurrent: false,
+    rendererOptions: { collapseSubtasks: false, showSubtasks: true },
+  });
 
   // Signal handler for the iOS CoreDevice tunnel keepalives + every
   // child spawned via exec.ts (maestro test, simctl install, rock run,
@@ -329,109 +404,8 @@ export async function runMaestroParallel(
   Deno.addSignalListener('SIGINT', onSig);
   Deno.addSignalListener('SIGTERM', onSig);
 
-  const androidDevices = chosen.filter((d) => d.platform === 'android');
-  const iosDevices = chosen.filter((d) => d.platform === 'ios');
-  const results: RunResult[] = [];
-
-  // Stagger applies ONLY within a parallel batch. Maestro 2.5.x collides
-  // on its per-second session-log directory when two processes start in
-  // the same wall-clock second, so siblings in a Promise.all need to be
-  // spaced. Sequential queues already have a natural gap (next starts
-  // after previous finishes), so they don't need it.
-  //
-  // Delay is CUMULATIVE within a batch: i=0 → 0 ms, i=1 → stagger,
-  // i=2 → 2*stagger, … Otherwise parallel callers all await the same
-  // fixed timeout and land in the same second together.
-  const stagger = resolved.processStartStaggerMs;
-  const makeStagger = () => {
-    let idx = 0;
-    return async <T>(fn: () => Promise<T>): Promise<T> => {
-      const i = idx++;
-      if (i > 0 && stagger > 0) {
-        await new Promise<void>((r) => setTimeout(r, stagger * i));
-      }
-      return await fn();
-    };
-  };
-
-  // Aggregated Maestro spinner. runDevice posts FlowEvent for each
-  // Pass/Fail line; we re-render a single label with running totals.
-  const mLabel = stepLabel(stepIdx('maestro'), total, 'Maestro tests');
-  const mSpinner = spinner(mLabel);
-  let mPass = 0;
-  let mFail = 0;
-  const renderM = (current?: string): void => {
-    const tally = `${mPass} ✓  ${mFail} ✗`;
-    mSpinner.message(`${mLabel} — ${tally}${current ? ` · ${current}` : ''}`);
-  };
-  const onEvent = (e: FlowEvent): void => {
-    if (e.status === 'pass') mPass++;
-    else mFail++;
-    renderM(`${e.device.name}: ${e.flow}`);
-  };
-  // shard-all doesn't have per-flow events, just falls back to plain runShardGroup.
-  const useEvents = !resolved.iosShardAll;
-
-  // Android: parallel processes, own stagger counter.
-  const androidStagger = makeStagger();
-  const androidPromise = Promise.all(
-    androidDevices.map((d) =>
-      androidStagger(() =>
-        runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved, useEvents ? onEvent : undefined)
-      ).then(
-        (r) => {
-          results.push(r);
-        },
-      )
-    ),
-  );
-
-  // iOS: sequential by default — XCTestService races on per-sim ports when
-  // multiple iOS simulators are driven concurrently. Opt into shard-all
-  // when the user knows their setup tolerates it.
-  const iosPromise = (async () => {
-    if (iosDevices.length === 0) return;
-    if (resolved.iosShardAll) {
-      const shardConfig = await makeShardConfig(cwd, resolved.maestroConfigPath, outBase);
-      const color = colorOf(iosDevices[0]!);
-      const group = await runShardGroup(
-        'ios',
-        iosDevices,
-        color,
-        prefixWidth,
-        cwd,
-        outBase,
-        shardConfig,
-        resolved,
-      );
-      for (const d of iosDevices) {
-        results.push({ device: d, exitCode: group.exitCode, outDir: group.outDir });
-      }
-      return;
-    }
-    if (resolved.iosSequential) {
-      // Sequential: previous finishes before next starts — no stagger needed.
-      for (const d of iosDevices) {
-        const r = await runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved, onEvent);
-        results.push(r);
-      }
-      return;
-    }
-    // Parallel iOS: own stagger counter, independent of Android's.
-    const iosStagger = makeStagger();
-    await Promise.all(
-      iosDevices.map((d) =>
-        iosStagger(() => runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved, onEvent)).then(
-          (r) => {
-            results.push(r);
-          },
-        )
-      ),
-    );
-  })();
-
   try {
-    await Promise.all([androidPromise, iosPromise]);
+    await phases.run();
   } finally {
     Deno.removeSignalListener('SIGINT', onSig);
     Deno.removeSignalListener('SIGTERM', onSig);
@@ -443,9 +417,6 @@ export async function runMaestroParallel(
 
   const failed = results.filter((r) => r.exitCode !== 0).length;
   const passed = results.length - failed;
-  // Stop the Maestro phase spinner. Green check on overall pass, red on fail.
-  if (failed === 0) mSpinner.stop(`${mLabel} — ${mPass} ✓  ${mFail} ✗`);
-  else mSpinner.fail(`${mLabel} — ${mPass} ✓  ${mFail} ✗`);
   if (failed === 0) {
     outro(`${passed}/${results.length} devices passed`, true);
   } else {
