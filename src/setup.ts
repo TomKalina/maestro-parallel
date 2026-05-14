@@ -278,6 +278,13 @@ export async function buildAndInstall(
     const buildLogPath = outBase
       ? join(cwd, outBase, `build-${groupKey}.log`)
       : undefined;
+    // Wrap report to also push status into onDeviceState so the
+    // default hook's clack spinner stays disabled (it checks
+    // `!!ctx.report`) — otherwise two renderers fight for the cursor.
+    const hookReport = (msg: string): void => {
+      opts.report?.(msg);
+      opts.onDeviceState?.(first.id, 'building', msg);
+    };
     const startedAt = Date.now();
     const artifact = await hooks.buildAndInstallFirst({
       device: first,
@@ -286,7 +293,7 @@ export async function buildAndInstall(
       log: firstLog,
       mode,
       buildLogPath,
-      report: opts.report,
+      report: hookReport,
     });
     const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
 
