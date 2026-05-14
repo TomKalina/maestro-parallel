@@ -273,6 +273,7 @@ export async function runMaestroParallel(
     }
     await buildAndInstall(chosen, cwd, resolved, colorOf, prefixWidth, buildMode, outBase, {
       quiet: true,
+      concurrent: resolved.concurrentBuilds,
       onDeviceState: (deviceId, state, detail) => {
         const d = deviceById.get(deviceId);
         if (!d) return;

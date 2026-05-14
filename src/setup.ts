@@ -219,6 +219,9 @@ export interface BuildAndInstallOpts {
   report?: (msg: string) => void;
   /** Per-device build/install state event. */
   onDeviceState?: (deviceId: string, state: DeviceBuildState, detail?: string) => void;
+  /** Run platform groups in parallel. Opt-in via config.concurrentBuilds.
+   *  Saves wall time but multiplies RAM/CPU/disk pressure. */
+  concurrent?: boolean;
 }
 
 export async function buildAndInstall(
@@ -259,12 +262,15 @@ export async function buildAndInstall(
     sayLine(`${C.dim}plan ${groupKey}: build on ${first.name}${restList}${C.reset}`);
   }
 
-  for (const [groupKey, groupDevices] of groups) {
+  const processGroup = async (
+    groupKey: GroupKey,
+    groupDevices: Device[],
+  ): Promise<void> => {
     const platform = platformOf(groupKey);
     const hooks = config.build?.[platform];
     if (!hooks) {
       sayLine(`${C.yellow}skip group ${groupKey}: no config.build.${platform} configured${C.reset}`);
-      continue;
+      return;
     }
 
     const first = groupDevices[0]!;
@@ -307,13 +313,13 @@ export async function buildAndInstall(
       );
       opts.onDeviceState?.(first.id, 'failed', `build failed (${elapsed}s)`);
       for (const r of rest) opts.onDeviceState?.(r.id, 'failed', 'no artifact');
-      continue;
+      return;
     }
     // First device's group build returned an artifact — the hook also
     // installed it on the first device.
     opts.onDeviceState?.(first.id, 'installed', `${elapsed}s`);
 
-    if (rest.length === 0) continue;
+    if (rest.length === 0) return;
 
     firstLog(`${C.dim}artifact: ${artifact.path}${C.reset}`);
 
@@ -370,6 +376,24 @@ export async function buildAndInstall(
         `${failures.length}/${installs.length} install(s) failed:\n  - ${messages.join('\n  - ')}`,
       );
     }
+  };
+
+  // Run all groups in parallel when opts.concurrent is set (config
+  // `concurrentBuilds: true`). Default sequential — safer on RAM.
+  if (opts.concurrent) {
+    const tasks = [...groups.entries()].map(([k, v]) => processGroup(k, v));
+    const settled = await Promise.allSettled(tasks);
+    const failures = settled.filter((s) => s.status === 'rejected') as PromiseRejectedResult[];
+    if (failures.length > 0) {
+      const messages = failures.map((f) =>
+        f.reason instanceof Error ? f.reason.message : String(f.reason)
+      );
+      throw new Error(
+        `${failures.length}/${tasks.length} group(s) failed:\n  - ${messages.join('\n  - ')}`,
+      );
+    }
+  } else {
+    for (const [k, v] of groups) await processGroup(k, v);
   }
   sayLine('');
 }

@@ -185,6 +185,16 @@ export interface MaestroParallelConfig {
    * control their own env when they spawn child processes.
    */
   buildEnv?: Record<string, string>;
+
+  /**
+   * Run platform groups (android, ios-sim, ios-usb) concurrently instead
+   * of sequentially. Wall time drops to max(group) instead of sum, but
+   * RAM/CPU/disk pressure multiplies — three xcodebuild/gradle/Metro
+   * pipelines at once can OOM a 16 GB Mac and Pods cache may race. Use
+   * only on beefy machines (M-series with ≥32 GB) where you know your
+   * project tolerates it. Default false.
+   */
+  concurrentBuilds?: boolean;
 }
 
 /** Identity helper for type-safe config in `.ts` config files. */
@@ -242,6 +252,7 @@ export function resolveConfig(c: MaestroParallelConfig): ResolvedConfig {
     buildMode: c.buildMode,
     buildStrategy: c.buildStrategy,
     buildEnv: c.buildEnv,
+    concurrentBuilds: c.concurrentBuilds ?? false,
   };
 }
 
