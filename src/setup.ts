@@ -7,7 +7,7 @@ import { join } from '@std/path';
 import type { BuildMode } from './buildMode.ts';
 import type { ResolvedConfig } from './config.ts';
 import { devicePrefix } from './devices.ts';
-import { run, spawnPrefixed } from './exec.ts';
+import { run, spawnPrefixed, spawnToFile } from './exec.ts';
 import type { Device, Platform } from './types.ts';
 import { C, log } from './ui.ts';
 
@@ -166,12 +166,30 @@ export async function clearAppState(
   if (!quiet) log(`${C.dim}cleared app state on ${devices.length} device(s)${C.reset}`);
 }
 
-async function defaultInstallAndroid(d: Device, apk: string, prefix: string): Promise<number> {
+async function defaultInstallAndroid(
+  d: Device,
+  apk: string,
+  prefix: string,
+  quiet = false,
+): Promise<number> {
+  if (quiet) {
+    const log = await Deno.makeTempFile({ prefix: 'mp-adb-install-' });
+    return await spawnToFile('adb', ['-s', d.id, 'install', '-r', apk], '.', log);
+  }
   log(`${prefix}${C.dim}$ adb -s ${d.id} install -r <apk>${C.reset}`);
   return await spawnPrefixed('adb', ['-s', d.id, 'install', '-r', apk], '.', prefix);
 }
 
-async function defaultInstallIosSim(d: Device, app: string, prefix: string): Promise<number> {
+async function defaultInstallIosSim(
+  d: Device,
+  app: string,
+  prefix: string,
+  quiet = false,
+): Promise<number> {
+  if (quiet) {
+    const log = await Deno.makeTempFile({ prefix: 'mp-simctl-install-' });
+    return await spawnToFile('xcrun', ['simctl', 'install', d.id, app], '.', log);
+  }
   log(`${prefix}${C.dim}$ xcrun simctl install ${d.id} <app>${C.reset}`);
   return await spawnPrefixed('xcrun', ['simctl', 'install', d.id, app], '.', prefix);
 }
@@ -187,11 +205,20 @@ const platformOf = (k: GroupKey): Platform => k === 'android' ? 'android' : 'ios
 // remaining devices. The build itself is delegated to user-supplied hooks
 // in the config (see `MaestroParallelConfig.build.{android,ios}`) — we have
 // no way to know whether the project uses Expo, bare RN, native Xcode, etc.
+export type DeviceBuildState =
+  | 'building'
+  | 'waiting'
+  | 'installing'
+  | 'installed'
+  | 'failed';
+
 export interface BuildAndInstallOpts {
   /** Suppress all internal log lines. Caller renders its own UI. */
   quiet?: boolean;
   /** Status channel forwarded to per-platform hooks via ctx.report. */
   report?: (msg: string) => void;
+  /** Per-device build/install state event. */
+  onDeviceState?: (deviceId: string, state: DeviceBuildState, detail?: string) => void;
 }
 
 export async function buildAndInstall(
@@ -245,6 +272,9 @@ export async function buildAndInstall(
     const firstPrefix = devicePrefix(first, colorOf(first), prefixWidth);
     const firstLog = quiet ? (_l: string): void => {} : (line: string): void => log(`${firstPrefix}${line}`);
 
+    opts.onDeviceState?.(first.id, 'building');
+    for (const r of rest) opts.onDeviceState?.(r.id, 'waiting');
+
     const buildLogPath = outBase
       ? join(cwd, outBase, `build-${groupKey}.log`)
       : undefined;
@@ -268,8 +298,13 @@ export async function buildAndInstall(
       firstLog(
         `${C.yellow}build failed for ${groupKey} (${elapsed}s); skipping install on ${rest.length} other device(s). Tests will run against the previously-installed app — if any.${C.reset}`,
       );
+      opts.onDeviceState?.(first.id, 'failed', `build failed (${elapsed}s)`);
+      for (const r of rest) opts.onDeviceState?.(r.id, 'failed', 'no artifact');
       continue;
     }
+    // First device's group build returned an artifact — the hook also
+    // installed it on the first device.
+    opts.onDeviceState?.(first.id, 'installed', `built (${elapsed}s)`);
 
     if (rest.length === 0) continue;
 
@@ -277,36 +312,42 @@ export async function buildAndInstall(
 
     const installs = rest.map(async (d) => {
       const p = devicePrefix(d, colorOf(d), prefixWidth);
-      log(`${p}${C.bold}install${C.reset} (reuse build from ${first.name})`);
+      const perDeviceLog = quiet ? (_l: string): void => {} : (line: string): void => log(`${p}${line}`);
+      sayLine(`${p}${C.bold}install${C.reset} (reuse build from ${first.name})`);
+      opts.report?.(`installing on ${d.name}…`);
+      opts.onDeviceState?.(d.id, 'installing');
       let code: number;
       if (hooks.installExisting) {
         code = await hooks.installExisting(
-          { device: d, group: [d], cwd, log: (line) => log(`${p}${line}`), mode },
+          { device: d, group: [d], cwd, log: perDeviceLog, mode },
           artifact,
         );
       } else if (groupKey === 'android') {
-        code = await defaultInstallAndroid(d, artifact.path, p);
+        code = await defaultInstallAndroid(d, artifact.path, p, quiet);
       } else if (groupKey === 'ios-sim') {
-        code = await defaultInstallIosSim(d, artifact.path, p);
+        code = await defaultInstallIosSim(d, artifact.path, p, quiet);
       } else {
-        log(
+        sayLine(
           `${p}${C.yellow}physical iOS reuse-install not supported; using per-device build hook${C.reset}`,
         );
         const perDevice = await hooks.buildAndInstallFirst({
           device: d,
           group: [d],
           cwd,
-          log: (line) => log(`${p}${line}`),
+          log: perDeviceLog,
           mode,
+          report: opts.report,
         });
         code = perDevice ? 0 : 1;
       }
       if (code !== 0) {
         const msg = `install failed on ${d.name} (${d.id}) — exit ${code}`;
-        log(`${p}${C.red}${msg}${C.reset}`);
+        sayLine(`${p}${C.red}${msg}${C.reset}`);
+        opts.onDeviceState?.(d.id, 'failed', `install failed (exit ${code})`);
         throw new Error(msg);
       }
-      log(`${p}${C.green}installed${C.reset}`);
+      sayLine(`${p}${C.green}installed${C.reset}`);
+      opts.onDeviceState?.(d.id, 'installed');
     });
     // Promise.allSettled — one failed install must not cancel the
     // siblings (Promise.all interleaves their logs over the error path
@@ -323,5 +364,5 @@ export async function buildAndInstall(
       );
     }
   }
-  log('');
+  sayLine('');
 }

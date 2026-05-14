@@ -66,6 +66,13 @@ export class TaskList {
   }
 
   /** Mark a step as running and (optionally) start the spinner timer. */
+  /** Replace the title (used to embed live state text on the same row). */
+  setTitle(idx: number, title: string): void {
+    this.steps[idx]!.title = title;
+    if (this.tty) this.redraw();
+    else this.emit(this.formatStepLine(this.steps[idx]!, idx, false));
+  }
+
   start(idx: number): void {
     this.steps[idx]!.state = 'running';
     if (this.tty) {
