@@ -20,20 +20,9 @@ import {
   warnIosPhysicalAutoLock,
 } from './setup.ts';
 import { setupIosSim } from './setupIosSim.ts';
+import { TaskList } from './taskList.ts';
 import type { Device, RunResult } from './types.ts';
-import {
-  fatal,
-  info,
-  intro,
-  note,
-  outro,
-  PALETTE,
-  plan,
-  spinner,
-  step,
-  stepLabel,
-  warn,
-} from './ui.ts';
+import { C, fatal, info, intro, note, outro, PALETTE, warn } from './ui.ts';
 
 export interface RunOptions {
   /** Project root. Default `Deno.cwd()`. */
@@ -242,7 +231,10 @@ export async function runMaestroParallel(
     prepare: 'Prepare devices',
     maestro: `Maestro tests (${chosen.length} device${chosen.length > 1 ? 's' : ''})`,
   };
-  plan(planSteps.map((s) => planLabels[s]));
+  // In-place checklist for the run phases. Every top-level task is
+  // visible from the start; sub-items fill in under the active one.
+  const tl = new TaskList(planSteps.map((s) => planLabels[s]));
+  tl.render();
 
   await pruneOldRuns(cwd, resolved.outputDir, resolved.keepRuns);
 
@@ -268,47 +260,45 @@ export async function runMaestroParallel(
   const stepIdx = (n: StepName) => planSteps.indexOf(n) + 1;
   const total = planSteps.length;
 
+  const buildTlIdx = stepIdx('build') - 1;
+  const prepareTlIdx = stepIdx('prepare') - 1;
+  const maestroTlIdx = stepIdx('maestro') - 1;
+
   if (buildMode === 'release' && resolved.build) {
-    step(stepLabel(stepIdx('build'), total, 'Build & install'));
-    await buildAndInstall(chosen, cwd, resolved, colorOf, prefixWidth, buildMode, outBase);
+    tl.start(buildTlIdx);
+    const buildStart = Date.now();
+    await buildAndInstall(chosen, cwd, resolved, colorOf, prefixWidth, buildMode, outBase, {
+      quiet: true,
+      report: (msg) => tl.message(buildTlIdx, msg),
+    });
+    tl.done(buildTlIdx, `${((Date.now() - buildStart) / 1000).toFixed(1)}s`);
   } else if (buildMode === 'skip') {
-    info("skip build — using whatever's already installed");
+    /* skip — no checklist entry */
   }
 
-  step(stepLabel(stepIdx('prepare'), total, 'Prepare devices'));
-  await wakeAndroidDevices(chosen);
-  const iosTunnels: IosTunnelHandle = await wakeIosPhysicalTunnels(chosen);
-  warnIosPhysicalAutoLock(chosen);
+  tl.start(prepareTlIdx);
+  tl.message(prepareTlIdx, 'waking Android devices…');
+  await wakeAndroidDevices(chosen, true);
+  tl.message(prepareTlIdx, 'establishing iOS tunnel(s)…');
+  const iosTunnels: IosTunnelHandle = await wakeIosPhysicalTunnels(chosen, true);
+  warnIosPhysicalAutoLock(chosen, true);
 
-  // Disable the iOS "Save Password?" / AutoFill prompt and keep the
-  // simulator's screen awake. Without this the AutoFill overlay floats
-  // above the app after any password submit and blocks Maestro's next
-  // step — the overlay is rendered by SpringBoard so the flow can't
-  // dismiss it. Sims only: physical iOS can't be configured programmatically.
   const iosSims = chosen.filter((d) => d.platform === 'ios' && d.kind === 'simulator');
   if (iosSims.length > 0) {
-    info(
-      `configuring ${iosSims.length} iOS sim(s): disable AutoFill, reset keychain, keep awake`,
-    );
+    tl.message(prepareTlIdx, `configuring ${iosSims.length} iOS sim(s)…`);
     await Promise.all(iosSims.map((d) => setupIosSim(d.id)));
   }
-  const iosPhysical = chosen.filter((d) => d.platform === 'ios' && d.kind === 'usb');
-  if (iosPhysical.length > 0) {
-    warn(
-      `physical iOS (${
-        iosPhysical.map((d) => d.name).join(', ')
-      }) — disable AutoFill manually: Settings → Passwords → Password Options → AutoFill Passwords (off).`,
-    );
-  }
 
-  // bundleId is required for the clear step; if absent we silently skip it.
   if (!options.skipClear && resolved.bundleId) {
-    await clearAppState(chosen, resolved.bundleId);
+    tl.message(prepareTlIdx, 'clearing app state…');
+    await clearAppState(chosen, resolved.bundleId, true);
   }
 
   if (resolved.hooks?.preTest) {
+    tl.message(prepareTlIdx, 'running preTest hook…');
     await resolved.hooks.preTest(chosen);
   }
+  tl.done(prepareTlIdx);
 
   // Signal handler for the iOS CoreDevice tunnel keepalives + every
   // child spawned via exec.ts (maestro test, simctl install, rock run,
@@ -354,23 +344,46 @@ export async function runMaestroParallel(
     };
   };
 
-  // Aggregated Maestro spinner. runDevice posts FlowEvent for each
-  // Pass/Fail line; we re-render a single label with running totals.
-  const mLabel = stepLabel(stepIdx('maestro'), total, 'Maestro tests');
-  const mSpinner = spinner(mLabel);
-  let mPass = 0;
-  let mFail = 0;
-  const renderM = (current?: string): void => {
-    const tally = `${mPass} ✓  ${mFail} ✗`;
-    mSpinner.message(`${mLabel} — ${tally}${current ? ` · ${current}` : ''}`);
+  // Per-device sub-rows under the Maestro step. Each device starts as
+  // a `pending` sub; tl.setSub flips state + text as Pass/Fail events
+  // come in.
+  tl.start(maestroTlIdx);
+  const nameWidth = Math.max(...chosen.map((d) => d.name.length));
+  const padName = (n: string) => n.padEnd(nameWidth);
+  const deviceIndex = new Map<string, number>(chosen.map((d, i) => [d.id, i]));
+  const tally = new Map<string, { pass: number; fail: number; current?: string }>();
+  for (let i = 0; i < chosen.length; i++) {
+    const d = chosen[i]!;
+    tally.set(d.id, { pass: 0, fail: 0 });
+    tl.setSub(maestroTlIdx, i, `${padName(d.name)}  ${C.dim}pending${C.reset}`, 'pending');
+  }
+  const renderDevice = (d: Device, state: 'pending' | 'running' | 'done' | 'failed'): void => {
+    const t = tally.get(d.id)!;
+    const sub = deviceIndex.get(d.id)!;
+    const counts = `${C.green}${t.pass} ✓${C.reset}  ${C.red}${t.fail} ✗${C.reset}`;
+    const tail = state === 'pending'
+      ? `${C.dim}pending${C.reset}`
+      : t.current
+      ? `${counts} ${C.dim}·${C.reset} ${t.current}`
+      : counts;
+    tl.setSub(maestroTlIdx, sub, `${padName(d.name)}  ${tail}`, state);
   };
   const onEvent = (e: FlowEvent): void => {
-    if (e.status === 'pass') mPass++;
-    else mFail++;
-    renderM(`${e.device.name}: ${e.flow}`);
+    const t = tally.get(e.device.id)!;
+    if (e.status === 'pass') t.pass++;
+    else t.fail++;
+    t.current = e.flow;
+    renderDevice(e.device, 'running');
   };
-  // shard-all doesn't have per-flow events, just falls back to plain runShardGroup.
   const useEvents = !resolved.iosShardAll;
+
+  // Helper — Maestro CLI just exited on this device. Flip the sub-row
+  // to a final state and clear the live flow text.
+  const finishDevice = (d: Device, exitCode: number): void => {
+    const t = tally.get(d.id)!;
+    t.current = undefined;
+    renderDevice(d, exitCode === 0 ? 'done' : 'failed');
+  };
 
   // Android: parallel processes, own stagger counter.
   const androidStagger = makeStagger();
@@ -381,6 +394,7 @@ export async function runMaestroParallel(
       ).then(
         (r) => {
           results.push(r);
+          finishDevice(d, r.exitCode);
         },
       )
     ),
@@ -406,6 +420,7 @@ export async function runMaestroParallel(
       );
       for (const d of iosDevices) {
         results.push({ device: d, exitCode: group.exitCode, outDir: group.outDir });
+        finishDevice(d, group.exitCode);
       }
       return;
     }
@@ -414,6 +429,7 @@ export async function runMaestroParallel(
       for (const d of iosDevices) {
         const r = await runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved, onEvent);
         results.push(r);
+        finishDevice(d, r.exitCode);
       }
       return;
     }
@@ -424,6 +440,7 @@ export async function runMaestroParallel(
         iosStagger(() => runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved, onEvent)).then(
           (r) => {
             results.push(r);
+            finishDevice(d, r.exitCode);
           },
         )
       ),
@@ -443,9 +460,10 @@ export async function runMaestroParallel(
 
   const failed = results.filter((r) => r.exitCode !== 0).length;
   const passed = results.length - failed;
-  // Stop the Maestro phase spinner. Green check on overall pass, red on fail.
-  if (failed === 0) mSpinner.stop(`${mLabel} — ${mPass} ✓  ${mFail} ✗`);
-  else mSpinner.fail(`${mLabel} — ${mPass} ✓  ${mFail} ✗`);
+  // Finalize the Maestro step.
+  if (failed === 0) tl.done(maestroTlIdx);
+  else tl.fail(maestroTlIdx);
+  tl.close();
   if (failed === 0) {
     outro(`${passed}/${results.length} devices passed`, true);
   } else {
