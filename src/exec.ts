@@ -237,6 +237,7 @@ export async function spawnSilentWithProgress(
   const idleKillMs = opts.idleKillMs ?? 0;
   let lastOutputAt = Date.now();
   let watchdogTimer: number | null = null;
+  let sigkillTimer: number | null = null;
   let killedByWatchdog = false;
   const armWatchdog = (): void => {
     if (idleKillMs <= 0) return;
@@ -250,11 +251,12 @@ export async function spawnSilentWithProgress(
       try {
         child.kill('SIGTERM');
       } catch { /* gone */ }
-      setTimeout(() => {
+      sigkillTimer = setTimeout(() => {
         try {
           child.kill('SIGKILL');
         } catch { /* gone */ }
       }, 5000);
+      Deno.unrefTimer(sigkillTimer);
     }, idleKillMs);
     Deno.unrefTimer(watchdogTimer);
   };
@@ -289,6 +291,7 @@ export async function spawnSilentWithProgress(
       pump(child.stderr).catch(() => {}),
     ]);
     if (watchdogTimer !== null) clearTimeout(watchdogTimer);
+    if (sigkillTimer !== null) clearTimeout(sigkillTimer);
     unregisterChild(child);
     // Watchdog-killed runs report as failure (137 for SIGKILL).
     if (killedByWatchdog) return status.code !== 0 ? status.code : 137;

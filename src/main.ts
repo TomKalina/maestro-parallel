@@ -253,6 +253,32 @@ export async function runMaestroParallel(
   );
   const colorOf = (d: Device): string => colorByDevice.get(d.id) ?? PALETTE[0]!;
 
+  // Signal handler registered upfront so any child spawned by preflight,
+  // build, prepare, or maestro phases is reaped on Ctrl-C — not only
+  // those spawned AFTER the prepare phase (where this handler used to
+  // live).
+  let iosTunnels: IosTunnelHandle = { stop: () => Promise.resolve() };
+  const cleanup = async (): Promise<void> => {
+    killAllChildren();
+    await iosTunnels.stop();
+  };
+  let deadlineTimer: number | null = null;
+  const onSig = (): void => {
+    // Race cleanup against a hard 3 s deadline; stuck children can't
+    // hang Ctrl-C. The timer ID is cleared on cleanup resolution so
+    // it doesn't dangle after exit() is called.
+    const deadline = new Promise<void>((r) => {
+      deadlineTimer = setTimeout(r, 3000);
+      Deno.unrefTimer(deadlineTimer);
+    });
+    Promise.race([cleanup(), deadline]).finally(() => {
+      if (deadlineTimer !== null) clearTimeout(deadlineTimer);
+      Deno.exit(130);
+    });
+  };
+  Deno.addSignalListener('SIGINT', onSig);
+  Deno.addSignalListener('SIGTERM', onSig);
+
   // Preflight runs unconditionally — even in skip mode the iOS sim
   // destination probe is useful (it warns about missing runtimes before
   // Maestro fails with a confusing simctl error).
@@ -333,7 +359,7 @@ export async function runMaestroParallel(
     updateRow(d, `${C.cyan}preparing${C.reset}`);
   }
   await wakeAndroidDevices(chosen, true);
-  const iosTunnels: IosTunnelHandle = await wakeIosPhysicalTunnels(chosen, true);
+  iosTunnels = await wakeIosPhysicalTunnels(chosen, true);
   warnIosPhysicalAutoLock(chosen, true);
 
   const iosSims = chosen.filter((d) => d.platform === 'ios' && d.kind === 'simulator');
@@ -346,25 +372,6 @@ export async function runMaestroParallel(
   if (resolved.hooks?.preTest) {
     await resolved.hooks.preTest(chosen);
   }
-
-  // Signal handler for the iOS CoreDevice tunnel keepalives + every
-  // child spawned via exec.ts (maestro test, simctl install, rock run,
-  // …). Without these reaps, Ctrl-C would orphan them: keepalives keep
-  // the tunnel open, Maestro keeps holding XCTest sessions, xcodebuild
-  // keeps DerivedData locked.
-  const cleanup = async (): Promise<void> => {
-    killAllChildren();
-    await iosTunnels.stop();
-  };
-  const onSig = (): void => {
-    // Race cleanup against a hard 3s deadline so a stuck child can't
-    // hang Ctrl-C indefinitely. The keepalive children get SIGTERM in
-    // iosTunnels.stop(); if they ignore it we just exit anyway.
-    const deadline = new Promise<void>((r) => setTimeout(r, 3000));
-    Promise.race([cleanup(), deadline]).finally(() => Deno.exit(130));
-  };
-  Deno.addSignalListener('SIGINT', onSig);
-  Deno.addSignalListener('SIGTERM', onSig);
 
   const androidDevices = chosen.filter((d) => d.platform === 'android');
   const iosDevices = chosen.filter((d) => d.platform === 'ios');
