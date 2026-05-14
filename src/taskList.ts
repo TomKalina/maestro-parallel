@@ -54,6 +54,11 @@ export class TaskList {
   private tty: boolean;
   private spinFrame = 0;
   private spinTimer: number | null = null;
+  /** Last time we called updater() — throttle redraws to avoid drowning
+   *  log-update in 100s of writes/sec from rapid gradle task output. */
+  private lastRenderAt = 0;
+  private pendingRender: number | null = null;
+  private readonly minRenderGapMs = 50;
 
   constructor(titles: string[]) {
     this.steps = titles.map((t) => ({ title: t, state: 'pending', subItems: [] }));
@@ -119,7 +124,7 @@ export class TaskList {
       this.spinTimer = null;
     }
     if (this.tty) {
-      this.refresh();
+      this.flush();
       // log-update top-level `done` finalises any updater; we use the
       // creator-bound instance so we call its `.done` method.
       logUpdate.done();
@@ -179,6 +184,36 @@ export class TaskList {
   }
 
   private refresh(): void {
-    updater(this.renderFrame());
+    const now = Date.now();
+    const gap = now - this.lastRenderAt;
+    if (gap >= this.minRenderGapMs) {
+      this.lastRenderAt = now;
+      if (this.pendingRender !== null) {
+        clearTimeout(this.pendingRender);
+        this.pendingRender = null;
+      }
+      updater(this.renderFrame());
+    } else if (this.pendingRender === null) {
+      // Schedule one redraw at the boundary; subsequent refresh() calls
+      // collapse into it.
+      this.pendingRender = setTimeout(() => {
+        this.pendingRender = null;
+        this.lastRenderAt = Date.now();
+        updater(this.renderFrame());
+      }, this.minRenderGapMs - gap);
+      Deno.unrefTimer(this.pendingRender);
+    }
+  }
+
+  /** Force any pending throttled redraw to fire now. Called from close(). */
+  private flush(): void {
+    if (this.pendingRender !== null) {
+      clearTimeout(this.pendingRender);
+      this.pendingRender = null;
+    }
+    if (this.tty) {
+      updater(this.renderFrame());
+      this.lastRenderAt = Date.now();
+    }
   }
 }

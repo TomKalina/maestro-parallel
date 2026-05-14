@@ -280,11 +280,21 @@ export async function runMaestroParallel(
         const i = deviceIndex.get(deviceId)!;
         switch (state) {
           case 'building': {
-            // Keep total row width inside common terminal columns so
-            // log-update doesn't see wrap and miscount its redraw region.
-            const MAX_DETAIL = 50;
-            const tail = detail && detail.length > MAX_DETAIL
-              ? detail.slice(0, MAX_DETAIL - 1) + '…'
+            // Total row width must stay inside terminal columns or
+            // log-update miscounts wraps and stale rows pile up. Compute
+            // the available detail budget from the live console size,
+            // minus the fixed row overhead (glyph + name pad + prefix
+            // text + safety).
+            const cols = (Deno.consoleSize?.()?.columns) ?? 80;
+            const fixedOverhead = 3 /* glyph + 2sp */ +
+              nameWidth + 2 /* "name  " */ +
+              8 /* "building" */ +
+              2 /* " (" */ +
+              1 /* ")" */ +
+              5 /* safety */;
+            const budget = Math.max(10, cols - fixedOverhead);
+            const tail = detail && detail.length > budget
+              ? detail.slice(0, budget - 1) + '…'
               : detail;
             updateRow(
               d,
