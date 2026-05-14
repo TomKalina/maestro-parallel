@@ -280,9 +280,15 @@ export async function runMaestroParallel(
         const i = deviceIndex.get(deviceId)!;
         switch (state) {
           case 'building':
-            updateRow(d, `${C.cyan}building${C.reset}`);
+            updateRow(
+              d,
+              `${C.cyan}building${C.reset}${detail ? ` ${C.dim}(${detail})${C.reset}` : ''}`,
+            );
             break;
           case 'waiting':
+            // Legacy state — current setup.ts emits 'building' for the
+            // whole group instead. Keep handler for back-compat with
+            // user-supplied hooks that may still emit 'waiting'.
             updateRow(d, `${C.dim}waiting (queued)${C.reset}`);
             break;
           case 'installing':

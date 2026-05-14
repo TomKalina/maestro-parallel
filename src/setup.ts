@@ -278,8 +278,11 @@ export async function buildAndInstall(
     const firstPrefix = devicePrefix(first, colorOf(first), prefixWidth);
     const firstLog = quiet ? (_l: string): void => {} : (line: string): void => log(`${firstPrefix}${line}`);
 
-    opts.onDeviceState?.(first.id, 'building');
-    for (const r of rest) opts.onDeviceState?.(r.id, 'waiting');
+    // The gradle/Metro/xcodebuild produces one artifact reused on every
+    // device in the group — show all devices as 'building (<group>)'
+    // until the artifact lands; reuse-install then flips the rest to
+    // 'installing' one by one.
+    for (const d of groupDevices) opts.onDeviceState?.(d.id, 'building', groupKey);
 
     const buildLogPath = outBase
       ? join(cwd, outBase, `build-${groupKey}.log`)
