@@ -64,6 +64,10 @@ The installed APK / `.app` is stale and doesn't contain the testIDs the flows re
 
 Check the build phase ran successfully. Logs are in `.maestro/output/parallel-<timestamp>/<device>/run.log`.
 
+## Where is the raw Maestro output?
+
+The terminal shows an aggregated spinner with `N ✓  M ✗ · <device>: <flow>` counters. Per-device Maestro stdout/stderr is captured into `.maestro/output/parallel-<timestamp>/<platform>-<name>-<udid8>/run.log`. Build phase output goes to `<outBase>/build-<group>.log`. Tail those when you need to dig into a single failure.
+
 ## Maestro CLI hangs in shutdown (`NoSuchFileException: ~/Library/Logs/maestro/<timestamp>`)
 
 Two Maestro processes started in the same wall-clock second; the first one to finalize zips and deletes the shared log dir, the second one trips a race in `DebugLogStore.finalizeRun`. Increase `processStartStaggerMs`:
