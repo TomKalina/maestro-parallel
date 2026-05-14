@@ -28,7 +28,7 @@ Maestro itself can target only one device per process. Running 5 devices means l
 
 ## Status
 
-Pre-1.0. Stable for daily use against real Expo projects (tested on RN 0.81 + Expo 54). API may break before 1.0.
+**Alpha.** Tested daily against real Expo projects (RN 0.81 + Expo 54). API may break before 1.0 — pin a version if you depend on stability.
 
 ## Source
 
