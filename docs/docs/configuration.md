@@ -81,3 +81,6 @@ Pin the auto-detect choice. Default `'auto'` (priority: rock > eas > expo). Use 
 
 ### `buildEnv?: Record<string, string>`
 Env merged into the auto-detected build child (Rock / EAS / expo run:*). Has no effect on user-defined `build.*` hooks — those control their own env. Common use: `SENTRY_DISABLE_AUTO_UPLOAD: 'true'`.
+
+### `concurrentBuilds?: boolean`
+Run platform groups (android, ios-sim, ios-usb) in parallel instead of sequentially. Wall time drops to `max(group)` instead of `sum`. **Default false.** RAM/CPU/disk pressure multiplies — three xcodebuild/gradle/Metro pipelines at once can OOM a 16 GB Mac and the Pods cache may race. Enable only on beefy machines (M-series with ≥ 32 GB).
