@@ -84,3 +84,14 @@ Env merged into the auto-detected build child (Rock / EAS / expo run:*). Has no 
 
 ### `concurrentBuilds?: boolean`
 Run platform groups (android, ios-sim, ios-usb) in parallel instead of sequentially. Wall time drops to `max(group)` instead of `sum`. **Default false.** RAM/CPU/disk pressure multiplies — three xcodebuild/gradle/Metro pipelines at once can OOM a 16 GB Mac and the Pods cache may race. Enable only on beefy machines (M-series with ≥ 32 GB).
+
+## Fingerprint-based build cache
+
+mp uses `@expo/fingerprint` — the same library Rock and Expo Build Cache use internally — to skip the build hook entirely when nothing native has changed. State stored at `.maestro/output/.fingerprint-<group>.json` (per platform group).
+
+On cache hit:
+- Build hook is **not invoked** — saves the full Rock/EAS/expo run:* spawn.
+- Reuse-install still runs on the rest of the group to bring devices into a known state.
+- Device row shows `built  cache hit`.
+
+Cache invalidated on any native change tracked by `@expo/fingerprint` (native deps, `ios/` and `android/` files, expo plugins, package.json scripts). JS-only edits don't bust it. Applies to **android** and **ios-sim** groups only; iOS USB always runs a fresh build (signing complications).

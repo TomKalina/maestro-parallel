@@ -8,6 +8,7 @@ import type { BuildMode } from './buildMode.ts';
 import type { ResolvedConfig } from './config.ts';
 import { devicePrefix } from './devices.ts';
 import { run, spawnPrefixed, spawnToFile } from './exec.ts';
+import * as fingerprint from './fingerprint.ts';
 import type { Device, Platform } from './types.ts';
 import { C, log } from './ui.ts';
 
@@ -278,11 +279,92 @@ export async function buildAndInstall(
     const firstPrefix = devicePrefix(first, colorOf(first), prefixWidth);
     const firstLog = quiet ? (_l: string): void => {} : (line: string): void => log(`${firstPrefix}${line}`);
 
+    // Per-device install fan-out shared by the cache-hit and full-build
+    // paths. Captures hooks, groupKey, first via closure.
+    const runReuseInstalls = async (
+      targets: Device[],
+      artifact: { path: string },
+    ): Promise<void> => {
+      const installs = targets.map(async (d) => {
+        const p = devicePrefix(d, colorOf(d), prefixWidth);
+        const perDeviceLog = quiet ? (_l: string): void => {} : (line: string): void => log(`${p}${line}`);
+        sayLine(`${p}${C.bold}install${C.reset} (reuse build from ${first.name})`);
+        opts.report?.(`installing on ${d.name}…`);
+        opts.onDeviceState?.(d.id, 'installing');
+        let code: number;
+        if (hooks.installExisting) {
+          code = await hooks.installExisting(
+            { device: d, group: [d], cwd, log: perDeviceLog, mode },
+            artifact,
+          );
+        } else if (groupKey === 'android') {
+          code = await defaultInstallAndroid(d, artifact.path, p, quiet);
+        } else if (groupKey === 'ios-sim') {
+          code = await defaultInstallIosSim(d, artifact.path, p, quiet);
+        } else {
+          sayLine(
+            `${p}${C.yellow}physical iOS reuse-install not supported; using per-device build hook${C.reset}`,
+          );
+          const perDevice = await hooks.buildAndInstallFirst({
+            device: d,
+            group: [d],
+            cwd,
+            log: perDeviceLog,
+            mode,
+            report: opts.report,
+          });
+          code = perDevice ? 0 : 1;
+        }
+        if (code !== 0) {
+          const msg = `install failed on ${d.name} (${d.id}) — exit ${code}`;
+          sayLine(`${p}${C.red}${msg}${C.reset}`);
+          opts.onDeviceState?.(d.id, 'failed', `install failed (exit ${code})`);
+          throw new Error(msg);
+        }
+        sayLine(`${p}${C.green}installed${C.reset}`);
+        opts.onDeviceState?.(d.id, 'installed');
+      });
+      const settled = await Promise.allSettled(installs);
+      const failures = settled.filter((s) => s.status === 'rejected') as PromiseRejectedResult[];
+      if (failures.length > 0) {
+        const messages = failures.map((f) =>
+          f.reason instanceof Error ? f.reason.message : String(f.reason)
+        );
+        throw new Error(
+          `${failures.length}/${installs.length} install(s) failed:\n  - ${messages.join('\n  - ')}`,
+        );
+      }
+    };
+
     // The gradle/Metro/xcodebuild produces one artifact reused on every
     // device in the group — show all devices as 'building (<group>)'
     // until the artifact lands; reuse-install then flips the rest to
     // 'installing' one by one.
     for (const d of groupDevices) opts.onDeviceState?.(d.id, 'building', groupKey);
+
+    // Fingerprint preflight: if the native fingerprint matches the last
+    // successful build AND the artifact is still on disk, skip the
+    // hook entirely. Reuse-install fan-out still runs to bring devices
+    // into a known state. Only applies to android + ios-sim (iOS USB
+    // signing complicates artifact reuse across runs).
+    if (groupKey === 'android' || groupKey === 'ios-sim') {
+      const currentHash = await fingerprint.compute(cwd, platform);
+      if (currentHash) {
+        const stored = await fingerprint.loadStored(cwd, config.outputDir, groupKey);
+        if (
+          stored && stored.hash === currentHash &&
+          (await fingerprint.artifactExists(stored.artifactPath))
+        ) {
+          opts.report?.(`cache hit (${groupKey})`);
+          opts.onDeviceState?.(first.id, 'installed', 'cache hit');
+          const cachedArtifact = { path: stored.artifactPath };
+          if (rest.length > 0) {
+            await runReuseInstalls(rest, cachedArtifact);
+          }
+          return;
+        }
+      }
+    }
 
     const buildLogPath = outBase
       ? join(cwd, outBase, `build-${groupKey}.log`)
@@ -322,63 +404,19 @@ export async function buildAndInstall(
     // installed it on the first device.
     opts.onDeviceState?.(first.id, 'installed', `${elapsed}s`);
 
+    // Successful build — persist the fingerprint for the next run's
+    // cache check. Only stores android + ios-sim (iOS USB per-device).
+    if (groupKey === 'android' || groupKey === 'ios-sim') {
+      const currentHash = await fingerprint.compute(cwd, platform);
+      if (currentHash) {
+        await fingerprint.save(cwd, config.outputDir, groupKey, currentHash, artifact.path);
+      }
+    }
+
     if (rest.length === 0) return;
 
     firstLog(`${C.dim}artifact: ${artifact.path}${C.reset}`);
-
-    const installs = rest.map(async (d) => {
-      const p = devicePrefix(d, colorOf(d), prefixWidth);
-      const perDeviceLog = quiet ? (_l: string): void => {} : (line: string): void => log(`${p}${line}`);
-      sayLine(`${p}${C.bold}install${C.reset} (reuse build from ${first.name})`);
-      opts.report?.(`installing on ${d.name}…`);
-      opts.onDeviceState?.(d.id, 'installing');
-      let code: number;
-      if (hooks.installExisting) {
-        code = await hooks.installExisting(
-          { device: d, group: [d], cwd, log: perDeviceLog, mode },
-          artifact,
-        );
-      } else if (groupKey === 'android') {
-        code = await defaultInstallAndroid(d, artifact.path, p, quiet);
-      } else if (groupKey === 'ios-sim') {
-        code = await defaultInstallIosSim(d, artifact.path, p, quiet);
-      } else {
-        sayLine(
-          `${p}${C.yellow}physical iOS reuse-install not supported; using per-device build hook${C.reset}`,
-        );
-        const perDevice = await hooks.buildAndInstallFirst({
-          device: d,
-          group: [d],
-          cwd,
-          log: perDeviceLog,
-          mode,
-          report: opts.report,
-        });
-        code = perDevice ? 0 : 1;
-      }
-      if (code !== 0) {
-        const msg = `install failed on ${d.name} (${d.id}) — exit ${code}`;
-        sayLine(`${p}${C.red}${msg}${C.reset}`);
-        opts.onDeviceState?.(d.id, 'failed', `install failed (exit ${code})`);
-        throw new Error(msg);
-      }
-      sayLine(`${p}${C.green}installed${C.reset}`);
-      opts.onDeviceState?.(d.id, 'installed');
-    });
-    // Promise.allSettled — one failed install must not cancel the
-    // siblings (Promise.all interleaves their logs over the error path
-    // and leaves partial installs running). After all settle, throw
-    // an aggregate so the top-level catch in cli.ts sees it.
-    const settled = await Promise.allSettled(installs);
-    const failures = settled.filter((s) => s.status === 'rejected') as PromiseRejectedResult[];
-    if (failures.length > 0) {
-      const messages = failures.map((f) =>
-        f.reason instanceof Error ? f.reason.message : String(f.reason)
-      );
-      throw new Error(
-        `${failures.length}/${installs.length} install(s) failed:\n  - ${messages.join('\n  - ')}`,
-      );
-    }
+    await runReuseInstalls(rest, artifact);
   };
 
   // Run all groups in parallel when opts.concurrent is set (config
