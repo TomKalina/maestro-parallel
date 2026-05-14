@@ -229,6 +229,33 @@ async function extractIosArchive(tarball: string): Promise<string | null> {
   return null;
 }
 
+// Parse the most common Rock / expo / xcodebuild progress markers into a
+// short status line. Returns null when the line is uninteresting.
+function parseProgressLine(line: string): string | null {
+  let m: RegExpMatchArray | null;
+  // Metro bundler — "Android ./App.tsx ▓░░ 14.5% (9/108)"
+  if ((m = line.match(/^(?:Android|iOS) \S+ .*?(\d+(?:\.\d+)?)% \(\d+\/\d+\)/))) {
+    return `metro bundling ${m[1]}%`;
+  }
+  // Gradle task — "> Task :app:bundleReleaseJsAndAssets"
+  if ((m = line.match(/^> Task :(\S+)/))) {
+    return `gradle: ${m[1]}`;
+  }
+  // Xcode pod compile — "Compiling Pods/Sentry » SentryClient.m"
+  if ((m = line.match(/^(?:› )?Compiling Pods\/(\S+) » /))) {
+    return `compiling ${m[1]}`;
+  }
+  // Rock high-level line — "› Building the app..."
+  if ((m = line.match(/^› (.+?)\.{0,3}$/))) {
+    return m[1].trim();
+  }
+  // Bundle output — "Android Bundled 27569ms App.tsx (3648 modules)"
+  if ((m = line.match(/^(?:Android|iOS) Bundled (\d+)ms .* \((\d+) modules\)/))) {
+    return `bundled ${m[2]} modules in ${m[1]}ms`;
+  }
+  return null;
+}
+
 // --- core hook factory -------------------------------------------------------
 
 interface ReleaseHookSpec {
@@ -263,7 +290,22 @@ function createReleaseHook(spec: ReleaseHookSpec): PlatformBuildHooks {
       // so we still get quiet output for the spinner UX.
       const logPath = ctx.buildLogPath ??
         (await Deno.makeTempFile({ prefix: 'maestro-parallel-build-', suffix: '.log' }));
-      const code = await spawnToFile(exe, args, ctx.cwd, logPath, spec.killMarker, env);
+      // Parse known progress markers from the build child's output and
+      // forward to ctx.report so the device row shows live status
+      // (gradle task, metro %, current pod). Raw stream stays in the
+      // log file untouched.
+      const code = await spawnToFile(
+        exe,
+        args,
+        ctx.cwd,
+        logPath,
+        spec.killMarker,
+        env,
+        (line) => {
+          const status = parseProgressLine(line);
+          if (status) ctx.report?.(status);
+        },
+      );
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
       if (code !== 0) {
         if (sp) sp.fail(`${spec.label} failed (exit ${code}, ${elapsed}s)${logHint}`);
