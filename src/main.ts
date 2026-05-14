@@ -220,21 +220,23 @@ export async function runMaestroParallel(
     }
   }
 
-  // Plan outline — print the steps about to run so the user sees scope
-  // up front. Skip optional steps (build, preflight when empty).
-  type StepName = 'build' | 'prepare' | 'maestro';
-  const planSteps: StepName[] = [];
-  if (buildMode === 'release' && haveBuildHooks) planSteps.push('build');
-  planSteps.push('prepare', 'maestro');
-  const planLabels: Record<StepName, string> = {
-    build: `Build & install on ${chosen.length} device${chosen.length > 1 ? 's' : ''}`,
-    prepare: 'Prepare devices',
-    maestro: `Maestro tests (${chosen.length} device${chosen.length > 1 ? 's' : ''})`,
-  };
-  // In-place checklist for the run phases. Every top-level task is
-  // visible from the start; sub-items fill in under the active one.
-  const tl = new TaskList(planSteps.map((s) => planLabels[s]));
+  // Device-centric checklist — one row per device, status flips on
+  // the same row as the device progresses through build/install/
+  // prepare/maestro phases.
+  const nameWidth = Math.max(...chosen.map((d) => d.name.length));
+  const padName = (n: string) => n.padEnd(nameWidth);
+  const renderRow = (d: Device, status: string): string =>
+    `${padName(d.name)}  ${status}`;
+  const tl = new TaskList(chosen.map((d) => renderRow(d, `${C.dim}pending${C.reset}`)));
   tl.render();
+  const deviceIndex = new Map<string, number>(chosen.map((d, i) => [d.id, i]));
+  // Single tally store + a helper that re-renders the row text with the
+  // device's current "status text" (left-of-tally) + counts.
+  const tally = new Map<string, { pass: number; fail: number; current?: string }>();
+  for (const d of chosen) tally.set(d.id, { pass: 0, fail: 0 });
+  const updateRow = (d: Device, status: string): void => {
+    tl.setTitle(deviceIndex.get(d.id)!, renderRow(d, status));
+  };
 
   await pruneOldRuns(cwd, resolved.outputDir, resolved.keepRuns);
 
@@ -257,48 +259,69 @@ export async function runMaestroParallel(
   const issues = await preflightChecks(cwd, chosen);
   logPreflight(issues);
 
-  const stepIdx = (n: StepName) => planSteps.indexOf(n) + 1;
-  const total = planSteps.length;
-
-  const buildTlIdx = stepIdx('build') - 1;
-  const prepareTlIdx = stepIdx('prepare') - 1;
-  const maestroTlIdx = stepIdx('maestro') - 1;
+  const deviceById = new Map<string, Device>(chosen.map((d) => [d.id, d]));
+  // Devices that hit a fatal error in the build/install stage — skip the
+  // maestro phase for them but keep their row in its terminal state.
+  const failedBeforeTest = new Set<string>();
 
   if (buildMode === 'release' && resolved.build) {
-    tl.start(buildTlIdx);
-    const buildStart = Date.now();
+    // Mark every device as 'building' / 'waiting' upfront so the user
+    // sees all rows light up at once instead of one-by-one.
+    for (const d of chosen) {
+      tl.start(deviceIndex.get(d.id)!);
+      updateRow(d, `${C.cyan}building${C.reset}`);
+    }
     await buildAndInstall(chosen, cwd, resolved, colorOf, prefixWidth, buildMode, outBase, {
       quiet: true,
-      report: (msg) => tl.message(buildTlIdx, msg),
+      onDeviceState: (deviceId, state, detail) => {
+        const d = deviceById.get(deviceId);
+        if (!d) return;
+        const i = deviceIndex.get(deviceId)!;
+        switch (state) {
+          case 'building':
+            updateRow(d, `${C.cyan}building${C.reset}`);
+            break;
+          case 'waiting':
+            updateRow(d, `${C.dim}waiting (queued)${C.reset}`);
+            break;
+          case 'installing':
+            updateRow(d, `${C.cyan}installing${C.reset}`);
+            break;
+          case 'installed':
+            updateRow(d, `${C.green}built${C.reset}${detail ? ` ${C.dim}${detail}${C.reset}` : ''}`);
+            break;
+          case 'failed':
+            updateRow(d, `${C.red}failed${C.reset}${detail ? ` ${C.dim}${detail}${C.reset}` : ''}`);
+            tl.fail(i);
+            failedBeforeTest.add(deviceId);
+            break;
+        }
+      },
     });
-    tl.done(buildTlIdx, `${((Date.now() - buildStart) / 1000).toFixed(1)}s`);
   } else if (buildMode === 'skip') {
-    /* skip — no checklist entry */
+    /* skip — devices remain pending until prepare flips them */
   }
 
-  tl.start(prepareTlIdx);
-  tl.message(prepareTlIdx, 'waking Android devices…');
+  for (const d of chosen) {
+    if (failedBeforeTest.has(d.id)) continue;
+    const i = deviceIndex.get(d.id)!;
+    tl.start(i);
+    updateRow(d, `${C.cyan}preparing${C.reset}`);
+  }
   await wakeAndroidDevices(chosen, true);
-  tl.message(prepareTlIdx, 'establishing iOS tunnel(s)…');
   const iosTunnels: IosTunnelHandle = await wakeIosPhysicalTunnels(chosen, true);
   warnIosPhysicalAutoLock(chosen, true);
 
   const iosSims = chosen.filter((d) => d.platform === 'ios' && d.kind === 'simulator');
   if (iosSims.length > 0) {
-    tl.message(prepareTlIdx, `configuring ${iosSims.length} iOS sim(s)…`);
     await Promise.all(iosSims.map((d) => setupIosSim(d.id)));
   }
-
   if (!options.skipClear && resolved.bundleId) {
-    tl.message(prepareTlIdx, 'clearing app state…');
     await clearAppState(chosen, resolved.bundleId, true);
   }
-
   if (resolved.hooks?.preTest) {
-    tl.message(prepareTlIdx, 'running preTest hook…');
     await resolved.hooks.preTest(chosen);
   }
-  tl.done(prepareTlIdx);
 
   // Signal handler for the iOS CoreDevice tunnel keepalives + every
   // child spawned via exec.ts (maestro test, simctl install, rock run,
@@ -344,45 +367,34 @@ export async function runMaestroParallel(
     };
   };
 
-  // Per-device sub-rows under the Maestro step. Each device starts as
-  // a `pending` sub; tl.setSub flips state + text as Pass/Fail events
-  // come in.
-  tl.start(maestroTlIdx);
-  const nameWidth = Math.max(...chosen.map((d) => d.name.length));
-  const padName = (n: string) => n.padEnd(nameWidth);
-  const deviceIndex = new Map<string, number>(chosen.map((d, i) => [d.id, i]));
-  const tally = new Map<string, { pass: number; fail: number; current?: string }>();
-  for (let i = 0; i < chosen.length; i++) {
-    const d = chosen[i]!;
-    tally.set(d.id, { pass: 0, fail: 0 });
-    tl.setSub(maestroTlIdx, i, `${padName(d.name)}  ${C.dim}pending${C.reset}`, 'pending');
+  // Maestro phase — each device's row shows current flow + tally.
+  for (const d of chosen) {
+    if (failedBeforeTest.has(d.id)) continue;
+    updateRow(d, `${C.cyan}starting maestro${C.reset}`);
   }
-  const renderDevice = (d: Device, state: 'pending' | 'running' | 'done' | 'failed'): void => {
+  const renderTestingRow = (d: Device): void => {
     const t = tally.get(d.id)!;
-    const sub = deviceIndex.get(d.id)!;
     const counts = `${C.green}${t.pass} ✓${C.reset}  ${C.red}${t.fail} ✗${C.reset}`;
-    const tail = state === 'pending'
-      ? `${C.dim}pending${C.reset}`
-      : t.current
-      ? `${counts} ${C.dim}·${C.reset} ${t.current}`
-      : counts;
-    tl.setSub(maestroTlIdx, sub, `${padName(d.name)}  ${tail}`, state);
+    const tail = t.current ? `${counts} ${C.dim}·${C.reset} ${t.current}` : counts;
+    updateRow(d, tail);
   };
   const onEvent = (e: FlowEvent): void => {
     const t = tally.get(e.device.id)!;
     if (e.status === 'pass') t.pass++;
     else t.fail++;
     t.current = e.flow;
-    renderDevice(e.device, 'running');
+    renderTestingRow(e.device);
   };
   const useEvents = !resolved.iosShardAll;
 
-  // Helper — Maestro CLI just exited on this device. Flip the sub-row
-  // to a final state and clear the live flow text.
   const finishDevice = (d: Device, exitCode: number): void => {
     const t = tally.get(d.id)!;
     t.current = undefined;
-    renderDevice(d, exitCode === 0 ? 'done' : 'failed');
+    const counts = `${C.green}${t.pass} ✓${C.reset}  ${C.red}${t.fail} ✗${C.reset}`;
+    const i = deviceIndex.get(d.id)!;
+    updateRow(d, counts);
+    if (exitCode === 0) tl.done(i);
+    else tl.fail(i);
   };
 
   // Android: parallel processes, own stagger counter.
@@ -455,15 +467,13 @@ export async function runMaestroParallel(
     await cleanup();
   }
 
+  tl.close();
+
   const merged = await mergeJunit(results, outBase);
   await summarize(results, outBase, merged);
 
   const failed = results.filter((r) => r.exitCode !== 0).length;
   const passed = results.length - failed;
-  // Finalize the Maestro step.
-  if (failed === 0) tl.done(maestroTlIdx);
-  else tl.fail(maestroTlIdx);
-  tl.close();
   if (failed === 0) {
     outro(`${passed}/${results.length} devices passed`, true);
   } else {

@@ -22,6 +22,11 @@ The CLI discovers devices, asks which to use, auto-detects the right build strat
 release artifact (or hits the build cache), runs flows in parallel, prints pass / fail. Picker is
 auto-skipped when only one device is present.
 
+After the picker, mp renders a **device-centric live checklist** — one row per selected device,
+status flips on the same row through `pending → building / waiting → installing → preparing →
+running maestro · <flow> · N ✓  M ✗ → done`. Raw build / Maestro output is captured into per-run
+log files; the terminal stays clean. In non-TTY (CI), the checklist degrades to forward-only lines.
+
 ```bash
 maestro-parallel                              # auto-detect, build + run
 maestro-parallel --all                        # every device, no picker
@@ -147,7 +152,6 @@ Not promises — directions. PRs welcome.
 - **WiFi Android discovery**: `adb connect <host>:<port>` auto-join.
 - **Android emulator boot**: `--boot <avd-name>` cold-start an emulator for the run.
 - **Cloud device pools**: BrowserStack / Sauce Labs adapter alongside local devices.
-- **Live progress dashboard**: TUI with per-device current-step + last log line.
 - **HTML report**: roll JUnit + Maestro debug bundles into a single browsable `index.html`.
 - **Slack / Discord webhook**: summary post after the run.
 - **`maestro-parallel doctor`**: pre-flight check (CLI versions, adb auth, sim state, Team ID).
