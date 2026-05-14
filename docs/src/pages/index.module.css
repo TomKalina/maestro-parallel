@@ -1,0 +1,299 @@
+/* Rock-inspired: clean, bold, type-driven. No glow gimmicks.
+   Use Docusaurus light/dark color vars so the whole site stays coherent. */
+
+:root {
+  --mp-accent: #6366f1;
+  --mp-accent-hover: #818cf8;
+  --mp-muted: #6b7280;
+  --mp-border: rgba(127, 127, 127, 0.18);
+  --mp-card-bg: var(--ifm-background-surface-color);
+}
+
+[data-theme='dark'] {
+  --mp-muted: #9ca3af;
+  --mp-border: rgba(255, 255, 255, 0.12);
+}
+
+/* ---------- Hero ----------------------------------------------------- */
+
+.hero {
+  position: relative;
+  padding: 7rem 1.5rem 5rem;
+  border-bottom: 1px solid var(--mp-border);
+}
+
+.heroInner {
+  max-width: 920px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.heroBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--mp-muted);
+  border: 1px solid var(--mp-border);
+  border-radius: 999px;
+  margin-bottom: 1.75rem;
+  letter-spacing: 0.01em;
+}
+
+.heroBadgeDot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+}
+
+.heroTitle {
+  font-size: clamp(2.5rem, 6vw, 4.5rem);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  margin: 0 0 1.5rem;
+  color: var(--ifm-heading-color);
+}
+
+.heroTagline {
+  font-size: clamp(1.05rem, 1.4vw, 1.25rem);
+  line-height: 1.55;
+  color: var(--mp-muted);
+  max-width: 720px;
+  margin: 0 auto 2.5rem;
+}
+
+.heroTagline code {
+  background: var(--mp-card-bg);
+  border: 1px solid var(--mp-border);
+  padding: 0.05em 0.4em;
+  border-radius: 0.4em;
+  font-size: 0.95em;
+  color: var(--ifm-color-content);
+}
+
+.heroInstall {
+  max-width: 720px;
+  margin: 0 auto 2.25rem;
+}
+
+.heroInstall pre {
+  background: var(--mp-card-bg);
+  border: 1px solid var(--mp-border);
+  border-radius: 0.8rem;
+  padding: 1rem 1.25rem;
+  margin: 0;
+  text-align: left;
+  font-size: 0.85rem;
+  overflow-x: auto;
+}
+
+.heroInstall code {
+  font-family: var(--ifm-font-family-monospace);
+  color: var(--ifm-color-content);
+}
+
+.heroPromptC {
+  color: var(--mp-accent);
+  font-weight: 700;
+  margin-right: 0.5rem;
+}
+
+.heroPromptW {
+  color: var(--ifm-color-content);
+}
+
+.heroCtas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.heroCtaPrimary,
+.heroCtaSecondary {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.7rem 1.4rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border-radius: 0.6rem;
+  text-decoration: none;
+  transition: background 120ms, border-color 120ms, color 120ms;
+  border: 1px solid transparent;
+}
+
+.heroCtaPrimary {
+  background: var(--ifm-color-content);
+  color: var(--ifm-background-color);
+}
+
+.heroCtaPrimary:hover {
+  background: var(--mp-accent);
+  color: white;
+  text-decoration: none;
+}
+
+.heroCtaSecondary {
+  background: transparent;
+  color: var(--ifm-color-content);
+  border-color: var(--mp-border);
+}
+
+.heroCtaSecondary:hover {
+  border-color: var(--ifm-color-content);
+  text-decoration: none;
+  color: var(--ifm-color-content);
+}
+
+.heroGlow {
+  display: none;
+}
+
+/* ---------- Terminal preview ----------------------------------------- */
+
+.terminalSection {
+  padding: 4rem 1.5rem 5rem;
+  border-bottom: 1px solid var(--mp-border);
+  background: var(--mp-card-bg);
+}
+
+.terminalWrap {
+  max-width: 920px;
+  margin: 0 auto;
+  border: 1px solid var(--mp-border);
+  border-radius: 0.9rem;
+  overflow: hidden;
+  background: #0d1117;
+  box-shadow: 0 30px 70px -30px rgba(0, 0, 0, 0.45),
+              0 8px 24px -10px rgba(0, 0, 0, 0.35);
+}
+
+.terminalChrome {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.65rem 1rem;
+  background: #161b22;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dotR, .dotY, .dotG {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+.dotR { background: #ff5f56; }
+.dotY { background: #ffbd2e; }
+.dotG { background: #27c93f; }
+
+.terminalTitle {
+  margin-left: 0.75rem;
+  font-size: 0.78rem;
+  color: #8b949e;
+  font-family: var(--ifm-font-family-monospace);
+}
+
+.terminal {
+  margin: 0;
+  padding: 1.25rem 1.5rem 1.5rem;
+  background: #0d1117;
+  color: #c9d1d9;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.tBox    { color: #6e7681; }
+.tStep   { color: #56d364; }
+.tCyan   { color: #79c0ff; }
+.tMag    { color: #d2a8ff; }
+.tGreen  { color: #56d364; }
+.tDim    { color: #6e7681; }
+
+/* ---------- Features grid -------------------------------------------- */
+
+.featuresSection {
+  padding: 5rem 1.5rem;
+}
+
+.featuresInner {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.featuresHeading {
+  font-size: clamp(1.75rem, 3vw, 2.25rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 2.5rem;
+  text-align: center;
+}
+
+.featuresGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.featureCard {
+  padding: 1.6rem 1.6rem 1.5rem;
+  background: var(--mp-card-bg);
+  border: 1px solid var(--mp-border);
+  border-radius: 0.8rem;
+  transition: transform 150ms, border-color 150ms;
+}
+
+.featureCard:hover {
+  border-color: var(--mp-accent);
+  transform: translateY(-2px);
+}
+
+.featureTitle {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0 0 0.55rem;
+  color: var(--ifm-heading-color);
+}
+
+.featureBody {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--mp-muted);
+  line-height: 1.55;
+}
+
+/* ---------- Final CTA ------------------------------------------------ */
+
+.finalSection {
+  padding: 5rem 1.5rem 6rem;
+  border-top: 1px solid var(--mp-border);
+  background: var(--mp-card-bg);
+}
+
+.finalInner {
+  max-width: 720px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.finalHeading {
+  font-size: clamp(1.75rem, 3.5vw, 2.5rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 2rem;
+}
+
+.finalCtas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+}

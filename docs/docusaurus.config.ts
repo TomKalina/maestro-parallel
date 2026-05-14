@@ -31,7 +31,7 @@ const config: Config = {
       {
         docs: {
           sidebarPath: './sidebars.ts',
-          routeBasePath: '/',
+          routeBasePath: '/docs',
           editUrl: 'https://github.com/TomKalina/maestro-parallel/tree/main/docs/',
         },
         blog: false,
@@ -49,6 +49,7 @@ const config: Config = {
     navbar: {
       title: 'maestro-parallel',
       items: [
+        { to: '/docs', label: 'Docs', position: 'left' },
         {
           href: 'https://github.com/TomKalina/maestro-parallel',
           label: 'GitHub',
@@ -62,9 +63,9 @@ const config: Config = {
         {
           title: 'Docs',
           items: [
-            { label: 'Getting started', to: '/getting-started' },
-            { label: 'Configuration', to: '/configuration' },
-            { label: 'Build strategies', to: '/build-strategies' },
+            { label: 'Getting started', to: '/docs/getting-started' },
+            { label: 'Configuration', to: '/docs/configuration' },
+            { label: 'Build strategies', to: '/docs/build-strategies' },
           ],
         },
         {
