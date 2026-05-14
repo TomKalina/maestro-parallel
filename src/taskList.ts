@@ -7,6 +7,7 @@
 // forward-only logging so CI logs stay readable.
 
 import logUpdate, { createLogUpdate } from 'npm:log-update@7.0.0';
+import process from 'node:process';
 
 import { C } from './ui.ts';
 
@@ -42,14 +43,11 @@ const BAR_GRAY = `${C.gray}│${C.reset}`;
 const SPIN_FRAMES = ['◐', '◓', '◑', '◒'];
 const SPIN_INTERVAL_MS = 80;
 
-// log-update writes to stdout by default; route it through stderr so we
-// don't pollute pipelines that consume stdout. Cast through unknown
-// because createLogUpdate's first arg is typed as NodeJS.WriteStream,
-// but the Node-compat WritableStream wrapper around Deno.stderr quacks
-// well enough at runtime.
-const updater = createLogUpdate(Deno.stderr as unknown as NodeJS.WriteStream, {
-  showCursor: false,
-});
+// log-update writes string to stream.write; Deno.stderr.write expects
+// typed array. Use node:process.stderr (Node compat layer accepts
+// strings) so log-update's internal write() doesn't blow up with
+// "expected typed ArrayBufferView".
+const updater = createLogUpdate(process.stderr, { showCursor: false });
 
 export class TaskList {
   private steps: StepModel[];
