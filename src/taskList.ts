@@ -49,10 +49,14 @@ const enc = new TextEncoder();
 
 export class TaskList {
   private steps: StepModel[];
-  private linesWritten = 0;
   private tty: boolean;
   private spinFrame = 0;
   private spinTimer: number | null = null;
+  /** Anchor saved on first render; every subsequent redraw restores to it. */
+  private anchorSaved = false;
+  /** Cursor hidden between first render and close() so the rapid redraws
+   *  don't flicker. Restored on close. */
+  private cursorHidden = false;
 
   constructor(titles: string[]) {
     this.steps = titles.map((t) => ({ title: t, state: 'pending', subItems: [] }));
@@ -127,13 +131,18 @@ export class TaskList {
     this.finish(idx, 'failed', suffix);
   }
 
-  /** Stop the spinner timer + final redraw. Call once when everything is done. */
+  /** Stop the spinner timer + final redraw + show cursor. Call once when
+   *  everything is done. */
   close(): void {
     if (this.spinTimer !== null) {
       clearInterval(this.spinTimer);
       this.spinTimer = null;
     }
     if (this.tty) this.redraw();
+    if (this.cursorHidden) {
+      Deno.stderr.writeSync(enc.encode('\x1b[?25h'));
+      this.cursorHidden = false;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -170,24 +179,20 @@ export class TaskList {
   }
 
   private redraw(): void {
-    if (this.linesWritten > 0) {
-      // After our last emit ended with `\n`, the cursor sits one line
-      // below our block. Walk up N times, clearing each line. Cursor
-      // ends at the first row of our previous block, ready to overwrite.
-      // The previous off-by-one (loop ran N-1 times) left the top row
-      // of the block uncleared — visible as a stale duplicate.
-      let seq = '\r';
-      for (let i = 0; i < this.linesWritten; i++) {
-        seq += '\x1b[1A\x1b[2K';
-      }
-      Deno.stderr.writeSync(enc.encode(seq));
+    if (!this.anchorSaved) {
+      // First draw — hide cursor, save anchor at the top of our block.
+      Deno.stderr.writeSync(enc.encode('\x1b[?25l\x1b[s'));
+      this.anchorSaved = true;
+      this.cursorHidden = true;
+    } else {
+      // Restore cursor to the saved anchor, clear from there to end of
+      // screen. No line-counting — robust against any stray stderr
+      // writes between redraws.
+      Deno.stderr.writeSync(enc.encode('\x1b[u\x1b[J'));
     }
-    this.linesWritten = 0;
     for (let i = 0; i < this.steps.length; i++) {
       const s = this.steps[i]!;
       this.emit(this.formatStepLine(s, i, /*tty*/ true));
-      // Show sub-items only while the step is running OR after it failed.
-      // Successful steps collapse so the block doesn't grow unbounded.
       const showSubs = s.state === 'running' || s.state === 'failed';
       if (showSubs) {
         for (const sub of s.subItems) {
@@ -200,6 +205,5 @@ export class TaskList {
 
   private emit(content: string): void {
     Deno.stderr.writeSync(enc.encode(content + '\n'));
-    this.linesWritten++;
   }
 }
