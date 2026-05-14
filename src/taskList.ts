@@ -47,7 +47,6 @@ const SPIN_INTERVAL_MS = 80;
 // typed array. Use node:process.stderr (Node compat layer accepts
 // strings) so log-update's internal write() doesn't blow up with
 // "expected typed ArrayBufferView".
-const updater = createLogUpdate(process.stderr, { showCursor: false });
 
 export class TaskList {
   private steps: StepModel[];
@@ -59,10 +58,14 @@ export class TaskList {
   private lastRenderAt = 0;
   private pendingRender: number | null = null;
   private readonly minRenderGapMs = 50;
+  /** Per-instance updater. A shared module-level instance would carry
+   *  stale internal line-count across library re-invocations. */
+  private updater: (text: string) => void;
 
   constructor(titles: string[]) {
     this.steps = titles.map((t) => ({ title: t, state: 'pending', subItems: [] }));
     this.tty = Deno.stderr.isTerminal();
+    this.updater = createLogUpdate(process.stderr, { showCursor: false });
   }
 
   /** Initial render — call once before any state changes. */
@@ -192,14 +195,14 @@ export class TaskList {
         clearTimeout(this.pendingRender);
         this.pendingRender = null;
       }
-      updater(this.renderFrame());
+      this.updater(this.renderFrame());
     } else if (this.pendingRender === null) {
       // Schedule one redraw at the boundary; subsequent refresh() calls
       // collapse into it.
       this.pendingRender = setTimeout(() => {
         this.pendingRender = null;
         this.lastRenderAt = Date.now();
-        updater(this.renderFrame());
+        this.updater(this.renderFrame());
       }, this.minRenderGapMs - gap);
       Deno.unrefTimer(this.pendingRender);
     }
@@ -212,7 +215,7 @@ export class TaskList {
       this.pendingRender = null;
     }
     if (this.tty) {
-      updater(this.renderFrame());
+      this.updater(this.renderFrame());
       this.lastRenderAt = Date.now();
     }
   }

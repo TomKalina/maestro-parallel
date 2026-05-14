@@ -40,7 +40,7 @@ export async function wakeAndroidDevices(devices: Device[], quiet = false): Prom
       `${C.dim}woke ${androids.length} Android device(s) and enabled stay-on-while-charging${C.reset}`,
     );
   }
-  if (stillLocked.length > 0) {
+  if (stillLocked.length > 0 && !quiet) {
     log(
       `${C.yellow}warning: device still locked (probably PIN-protected): ${
         stillLocked.join(', ')
@@ -337,10 +337,11 @@ export async function buildAndInstall(
     };
 
     // The gradle/Metro/xcodebuild produces one artifact reused on every
-    // device in the group — show all devices as 'building (<group>)'
-    // until the artifact lands; reuse-install then flips the rest to
-    // 'installing' one by one.
-    for (const d of groupDevices) opts.onDeviceState?.(d.id, 'building', groupKey);
+    // device in the group — show all devices as 'building' until the
+    // artifact lands; reuse-install then flips the rest to 'installing'
+    // one by one. Detail is intentionally empty here so the parsed
+    // progress markers (gradle task, metro %, …) show through unobstructed.
+    for (const d of groupDevices) opts.onDeviceState?.(d.id, 'building');
 
     // Fingerprint preflight: if the native fingerprint matches the last
     // successful build AND the artifact is still on disk, skip the

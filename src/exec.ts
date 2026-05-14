@@ -47,11 +47,11 @@ export async function run(cmd: string, args: string[]): Promise<RunResult> {
       stderr: dec.decode(out.stderr),
     };
   } catch (e) {
-    // Most often ENOENT for missing binary; log it so the user can
-    // diagnose without diffing strace. `has(cmd)` itself relies on this
-    // path returning a non-zero code, so we keep the 127 return shape.
+    // Most often ENOENT for missing binary. Don't print to stderr —
+    // a live TaskList frame would be corrupted. The error message is
+    // returned in the .stderr field; callers that care can surface it
+    // (e.g. via fatal()) when their context allows.
     const msg = e instanceof Error ? e.message : String(e);
-    console.error(`\x1b[33mrun(${cmd}) threw: ${msg}\x1b[0m`);
     return { code: 127, stdout: '', stderr: msg };
   }
 }
