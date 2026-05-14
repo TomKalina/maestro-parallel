@@ -1,6 +1,8 @@
 // Subprocess wrappers used everywhere. `run` captures, `spawnPrefixed`
 // streams with a per-line prefix (used for build/install + maestro).
 
+import { BAR } from './ui.ts';
+
 export interface RunResult {
   code: number;
   stdout: string;
@@ -293,12 +295,12 @@ async function spawnPrefixedInternal(
       const lines = text.split('\n');
       carry = lines.pop() ?? '';
       for (const line of lines) {
-        await Deno.stdout.write(enc.encode(`${prefix}${line}\n`));
+        await Deno.stdout.write(enc.encode(`${BAR}${prefix}${line}\n`));
         if (logFile) await logFile.write(enc.encode(line + '\n'));
       }
     }
     if (carry) {
-      await Deno.stdout.write(enc.encode(prefix + carry + '\n'));
+      await Deno.stdout.write(enc.encode(`${BAR}${prefix}${carry}\n`));
       if (logFile) await logFile.write(enc.encode(carry + '\n'));
     }
   };

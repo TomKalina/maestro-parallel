@@ -49,6 +49,12 @@ export interface RunOptions {
    * (TTY) or `release` (non-TTY).
    */
   buildMode?: BuildMode;
+  /**
+   * Path of the auto-discovered config file (used purely to display in
+   * the configuration block). cli.ts forwards `loaded.path`; library
+   * callers usually leave it undefined.
+   */
+  configPath?: string;
 }
 
 async function pruneOldRuns(cwd: string, outputDir: string, keep: number): Promise<void> {
@@ -139,6 +145,7 @@ export async function runMaestroParallel(
     cwd,
     flows: resolved.flowsDir,
   };
+  if (options.configPath) configLines.config = options.configPath;
   if (resolved.bundleId) configLines.bundleId = resolved.bundleId;
   if (detectedDescription) configLines.build = detectedDescription;
 

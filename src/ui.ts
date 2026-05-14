@@ -29,9 +29,20 @@ export const PALETTE = [
   '\x1b[94m',
 ];
 
+/**
+ * Vertical bar that clack draws on the left edge of the run box. Prepend
+ * it (with the standard 2-space gutter) to any line you stream outside
+ * clack's helpers so the box stays visually closed.
+ */
+export const BAR = `${C.gray}│${C.reset}  `;
+
 // Plain streaming print — used by spawnPrefixed for build / maestro
 // output where we want raw per-device line-by-line. Goes to stderr.
-export const log = (msg: string): void => console.error(msg);
+// Every line is prefixed with the clack bar so it stays inside the box.
+export const log = (msg: string): void => console.error(`${BAR}${msg}`);
+
+/** Raw print without the bar prefix. Use sparingly. */
+export const logRaw = (msg: string): void => console.error(msg);
 
 export const fatal = (msg: string): never => {
   clack.cancel(msg);
