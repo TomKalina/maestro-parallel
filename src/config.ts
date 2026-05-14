@@ -236,6 +236,11 @@ export function resolveConfig(c: MaestroParallelConfig): ResolvedConfig {
       "Invalid config: 'iosSequential' and 'iosShardAll' are mutually exclusive. shard-all already runs every sim through a single Maestro process; sequential makes no sense alongside it.",
     );
   }
+  if (c.keepRuns !== undefined && (!Number.isInteger(c.keepRuns) || c.keepRuns < 1)) {
+    throw new Error(
+      `Invalid config: 'keepRuns' must be a positive integer (got ${c.keepRuns}). Prune would otherwise delete the current run directory.`,
+    );
+  }
   return {
     bundleId: c.bundleId,
     flowsDir: c.flowsDir ?? '.maestro',
