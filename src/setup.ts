@@ -16,7 +16,7 @@ import { C, log } from './ui.ts';
 // activity, the surface is black, and every test fails with "Element not
 // found". `svc power stayon true` requires USB power, which is the case
 // here.
-export async function wakeAndroidDevices(devices: Device[], quiet = false): Promise<void> {
+export async function wakeAndroidDevices(devices: Device[]): Promise<void> {
   const androids = devices.filter((d) => d.platform === 'android');
   if (androids.length === 0) return;
   const stillLocked: string[] = [];
@@ -34,11 +34,9 @@ export async function wakeAndroidDevices(devices: Device[], quiet = false): Prom
       stillLocked.push(`${d.name} (${d.id})`);
     }
   }));
-  if (!quiet) {
-    log(
-      `${C.dim}woke ${androids.length} Android device(s) and enabled stay-on-while-charging${C.reset}`,
-    );
-  }
+  log(
+    `${C.dim}woke ${androids.length} Android device(s) and enabled stay-on-while-charging${C.reset}`,
+  );
   if (stillLocked.length > 0) {
     log(
       `${C.yellow}warning: device still locked (probably PIN-protected): ${
@@ -53,8 +51,7 @@ export async function wakeAndroidDevices(devices: Device[], quiet = false): Prom
 // xcrun/devicectl. Best we can do is warn so the user disables it manually
 // (Settings → Display & Brightness → Auto-Lock → Never). iOS simulators ARE
 // handled — `setupIosSim` writes `SBIdleTimerDisabled` for those.
-export function warnIosPhysicalAutoLock(devices: Device[], quiet = false): void {
-  if (quiet) return;
+export function warnIosPhysicalAutoLock(devices: Device[]): void {
   const physical = devices.filter((d) => d.platform === 'ios' && d.kind === 'usb');
   if (physical.length === 0) return;
   log(
@@ -80,19 +77,14 @@ export interface IosTunnelHandle {
 // tunnel decays again shortly after the command exits, which is too soon
 // when tests start staggered seconds later. So we keep the command running
 // for the duration of the test run and kill it during teardown.
-export async function wakeIosPhysicalTunnels(
-  devices: Device[],
-  quiet = false,
-): Promise<IosTunnelHandle> {
+export async function wakeIosPhysicalTunnels(devices: Device[]): Promise<IosTunnelHandle> {
   const physical = devices.filter((d) => d.platform === 'ios' && d.kind === 'usb');
   const empty: IosTunnelHandle = { stop: () => Promise.resolve() };
   if (physical.length === 0) return empty;
 
-  if (!quiet) {
-    log(
-      `${C.dim}establishing iOS tunnel(s) for ${physical.map((d) => d.name).join(', ')}...${C.reset}`,
-    );
-  }
+  log(
+    `${C.dim}establishing iOS tunnel(s) for ${physical.map((d) => d.name).join(', ')}...${C.reset}`,
+  );
 
   const children: Deno.ChildProcess[] = [];
   await Promise.all(physical.map(async (d) => {
@@ -113,7 +105,7 @@ export async function wakeIosPhysicalTunnels(
     await new Promise<void>((r) => setTimeout(r, 3000));
   }));
 
-  if (!quiet) log(`${C.dim}iOS tunnel(s) ready (${children.length} keepalive process(es))${C.reset}`);
+  log(`${C.dim}iOS tunnel(s) ready (${children.length} keepalive process(es))${C.reset}`);
 
   let stopped = false;
   return {
@@ -135,11 +127,7 @@ export async function wakeIosPhysicalTunnels(
 // `launchApp.clearState: true` — on iOS Maestro 2.5.x uninstalls the app
 // then fails to reinstall it (no .app path cached after our runner-side
 // install), and the test runs against an empty home screen.
-export async function clearAppState(
-  devices: Device[],
-  bundleId: string,
-  quiet = false,
-): Promise<void> {
+export async function clearAppState(devices: Device[], bundleId: string): Promise<void> {
   await Promise.all(devices.map(async (d) => {
     if (d.platform === 'android') {
       await run('adb', ['-s', d.id, 'shell', 'pm', 'clear', bundleId]);
@@ -163,7 +151,7 @@ export async function clearAppState(
       // automatic pre-flight phase landed.
     }
   }));
-  if (!quiet) log(`${C.dim}cleared app state on ${devices.length} device(s)${C.reset}`);
+  log(`${C.dim}cleared app state on ${devices.length} device(s)${C.reset}`);
 }
 
 async function defaultInstallAndroid(d: Device, apk: string, prefix: string): Promise<number> {
@@ -187,13 +175,6 @@ const platformOf = (k: GroupKey): Platform => k === 'android' ? 'android' : 'ios
 // remaining devices. The build itself is delegated to user-supplied hooks
 // in the config (see `MaestroParallelConfig.build.{android,ios}`) — we have
 // no way to know whether the project uses Expo, bare RN, native Xcode, etc.
-export interface BuildAndInstallOpts {
-  /** Suppress all internal log lines. The caller (Listr task) renders its own UI. */
-  quiet?: boolean;
-  /** Status channel forwarded to every per-platform hook via ctx.report. */
-  report?: (msg: string) => void;
-}
-
 export async function buildAndInstall(
   devices: Device[],
   cwd: string,
@@ -202,12 +183,9 @@ export async function buildAndInstall(
   prefixWidth: number,
   mode: BuildMode,
   outBase?: string,
-  opts: BuildAndInstallOpts = {},
 ): Promise<void> {
-  const quiet = !!opts.quiet;
-  const sayLine = quiet ? (_msg: string): void => {} : log;
-  sayLine('');
-  sayLine(
+  log('');
+  log(
     `${C.bold}Build & install (${devices.length} device${
       devices.length > 1 ? 's' : ''
     }, mode: ${mode})${C.reset}`,
@@ -229,21 +207,21 @@ export async function buildAndInstall(
     const restList = rest.length > 0
       ? `, reuse-install on: ${rest.map((d) => d.name).join(', ')}`
       : '';
-    sayLine(`${C.dim}plan ${groupKey}: build on ${first.name}${restList}${C.reset}`);
+    log(`${C.dim}plan ${groupKey}: build on ${first.name}${restList}${C.reset}`);
   }
 
   for (const [groupKey, groupDevices] of groups) {
     const platform = platformOf(groupKey);
     const hooks = config.build?.[platform];
     if (!hooks) {
-      sayLine(`${C.yellow}skip group ${groupKey}: no config.build.${platform} configured${C.reset}`);
+      log(`${C.yellow}skip group ${groupKey}: no config.build.${platform} configured${C.reset}`);
       continue;
     }
 
     const first = groupDevices[0]!;
     const rest = groupDevices.slice(1);
     const firstPrefix = devicePrefix(first, colorOf(first), prefixWidth);
-    const firstLog = quiet ? (_l: string): void => {} : (line: string): void => log(`${firstPrefix}${line}`);
+    const firstLog = (line: string): void => log(`${firstPrefix}${line}`);
 
     const buildLogPath = outBase
       ? join(cwd, outBase, `build-${groupKey}.log`)
@@ -256,15 +234,17 @@ export async function buildAndInstall(
       log: firstLog,
       mode,
       buildLogPath,
-      report: opts.report,
     });
     const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
 
     if (!artifact) {
+      // Hook returned null = build OR first install failed. Skip the per-
+      // device fan-out (it would just re-run the same broken build N times
+      // for 8 s each). Tests can still run against whatever's already on
+      // the devices.
       firstLog(
         `${C.yellow}build failed for ${groupKey} (${elapsed}s); skipping install on ${rest.length} other device(s). Tests will run against the previously-installed app — if any.${C.reset}`,
       );
-      opts.report?.(`build failed for ${groupKey}`);
       continue;
     }
 
@@ -274,8 +254,7 @@ export async function buildAndInstall(
 
     const installs = rest.map(async (d) => {
       const p = devicePrefix(d, colorOf(d), prefixWidth);
-      sayLine(`${p}${C.bold}install${C.reset} (reuse build from ${first.name})`);
-      opts.report?.(`installing on ${d.name}…`);
+      log(`${p}${C.bold}install${C.reset} (reuse build from ${first.name})`);
       let code: number;
       if (hooks.installExisting) {
         code = await hooks.installExisting(

@@ -25,13 +25,6 @@ export interface BuildContext {
    * stdout. Custom hooks may ignore this and stream as before.
    */
   buildLogPath?: string;
-  /**
-   * Progress channel. When provided, the default hooks bypass their
-   * internal clack spinner and report status through this callback
-   * instead. mp uses this to feed Listr's `task.output` while the wider
-   * checklist UI manages the screen.
-   */
-  report?: (msg: string) => void;
 }
 
 export interface ResolvedArtifact {
