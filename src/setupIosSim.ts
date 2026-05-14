@@ -10,17 +10,30 @@ import { run } from './exec.ts';
 import { C, log } from './ui.ts';
 
 export async function setupIosSim(udid: string): Promise<void> {
-  // iOS 17 split the AutoFill toggle into two keys; iOS 26 added a
-  // 'SaveSuggestedPassword' key for the post-submit "Save Password?"
-  // overlay. Write every variant so all runtimes pick up at least one.
-  const defaultsWrites: Array<[domain: string, key: string]> = [
+  // The 'Save Password?' overlay is actually fired by passd (Password
+  // Daemon), not the Settings app, so we have to set both the
+  // user-visible Settings preference AND the same key in the global
+  // defaults that passd reads at startup. Cover every domain variant
+  // shipped across iOS 14 → iOS 26 — iOS picks up whichever one its
+  // build links against.
+  const writes: Array<[domain: string | '-g', key: string]> = [
+    // Settings app — sim-specific bridge domain (iOS 14-16).
     ['com.apple.preferences.password.RemoteUI.SimulatorBundleSettings', 'AutoFillPasswords'],
     ['com.apple.preferences.password.RemoteUI.SimulatorBundleSettings', 'AutoFillPasswordsAndPasskeys'],
     ['com.apple.preferences.password.RemoteUI.SimulatorBundleSettings', 'SaveSuggestedPassword'],
+    // Settings app — device-style domain (iOS 17+).
+    ['com.apple.preferences.password', 'AutoFillPasswords'],
+    ['com.apple.preferences.password', 'AutoFillPasswordsAndPasskeys'],
+    ['com.apple.preferences.password', 'SaveSuggestedPassword'],
+    // Global defaults — passd / AutoFillFramework read here.
+    ['-g', 'AutoFillPasswords'],
+    ['-g', 'AutoFillPasswordsAndPasskeys'],
+    ['-g', 'SaveSuggestedPassword'],
+    // Framework-level fallback.
     ['com.apple.AutoFillFramework', 'AutoFillEnabled'],
     ['com.apple.AutoFillFramework', 'SaveSuggestedPassword'],
   ];
-  for (const [domain, key] of defaultsWrites) {
+  for (const [domain, key] of writes) {
     await run('xcrun', ['simctl', 'spawn', udid, 'defaults', 'write', domain, key, '-bool', 'false']);
   }
   // Wipe any saved credential so the prompt has nothing to offer to save.
@@ -39,10 +52,11 @@ export async function setupIosSim(udid: string): Promise<void> {
     '-bool',
     'true',
   ]);
-  // Force SpringBoard to re-read the defaults — without a respring the
-  // already-running process keeps the cached values and the overlay
-  // still fires on form submit.
+  // Respring both daemons so they re-read the toggles. Without this
+  // the already-running passd keeps cached values and the overlay
+  // still fires.
   await run('xcrun', ['simctl', 'spawn', udid, 'killall', '-HUP', 'SpringBoard']);
+  await run('xcrun', ['simctl', 'spawn', udid, 'killall', '-9', 'passd']);
 }
 
 /** Run setupIosSim against every currently-booted simulator. CLI helper. */
