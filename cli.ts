@@ -9,7 +9,7 @@ import { defineConfig, type MaestroParallelConfig } from './src/config.ts';
 import { loadConfig } from './src/loadConfig.ts';
 import { runMaestroParallel } from './src/main.ts';
 import { setupAllBootedSimulators } from './src/setupIosSim.ts';
-import { C, fatal, log } from './src/ui.ts';
+import { C, fatal } from './src/ui.ts';
 
 const HELP = `
 maestro-parallel — run Maestro flows on multiple devices in parallel.
@@ -84,14 +84,14 @@ async function main(): Promise<void> {
   const loaded = await loadConfig(cwd, args.config as string | undefined);
   let config: MaestroParallelConfig;
 
+  let configPath: string | undefined;
   if (loaded) {
-    log(`${C.dim}config:${C.reset} ${loaded.path}`);
+    configPath = loaded.path;
     config = loaded.config;
   } else if (args.config) {
     return fatal(`Config file not found: ${args.config}`);
   } else {
     config = defineConfig({});
-    log(`${C.dim}no config file found; running with defaults${C.reset}`);
   }
 
   if (flowsArg) {
@@ -115,6 +115,7 @@ async function main(): Promise<void> {
     allDevices: args.all as boolean | undefined,
     skipBuild: args['skip-build'] as boolean | undefined,
     skipClear: args['skip-clear'] as boolean | undefined,
+    configPath,
   });
   Deno.exit(code);
 }
