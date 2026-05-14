@@ -37,7 +37,13 @@ export async function loadConfig(
 
   // Deno can import .ts / .mts / .js / .mjs / .cjs natively. file:// URL is
   // required for absolute filesystem paths in dynamic imports.
-  const mod = await import(toFileUrl(path).href) as Record<string, unknown>;
+  let mod: Record<string, unknown>;
+  try {
+    mod = await import(toFileUrl(path).href) as Record<string, unknown>;
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    throw new Error(`Config file failed to load: ${path}\n  ${reason}`);
+  }
   const config = (mod.default ?? mod.config) as MaestroParallelConfig | undefined;
   if (!config) {
     throw new Error(
