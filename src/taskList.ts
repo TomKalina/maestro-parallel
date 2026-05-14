@@ -171,12 +171,16 @@ export class TaskList {
 
   private redraw(): void {
     if (this.linesWritten > 0) {
-      // `\r` goes to column 0 first (some terminals leave the cursor
-      // mid-line after our writes), then `\x1b[NA` moves up N rows,
-      // then `\x1b[J` clears from there to end of screen. Without the
-      // CR, partial overwrite leaves the previous line's right half
-      // visible — observed as duplicated names.
-      Deno.stderr.writeSync(enc.encode(`\r\x1b[${this.linesWritten}A\x1b[J`));
+      // Erase each previously-written line individually. The single
+      // up-N + J approach broke on some terminals when an external
+      // write left the cursor mid-line — clearing each line with
+      // \x1b[2K is more defensive. Pattern per line: \r (column 0),
+      // \x1b[2K (clear entire line), \x1b[1A (up one row).
+      let seq = '\r\x1b[2K';
+      for (let i = 1; i < this.linesWritten; i++) {
+        seq += '\x1b[1A\x1b[2K';
+      }
+      Deno.stderr.writeSync(enc.encode(seq));
     }
     this.linesWritten = 0;
     for (let i = 0; i < this.steps.length; i++) {
