@@ -235,7 +235,7 @@ export async function runMaestroParallel(
 
   if (buildMode === 'release' && resolved.build) {
     step('Build & install');
-    await buildAndInstall(chosen, cwd, resolved, colorOf, prefixWidth, buildMode);
+    await buildAndInstall(chosen, cwd, resolved, colorOf, prefixWidth, buildMode, outBase);
   } else if (buildMode === 'skip') {
     info("skip build — using whatever's already installed");
   }

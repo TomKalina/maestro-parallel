@@ -106,6 +106,79 @@ export async function spawnPrefixedTee(
 }
 
 /**
+ * Spawn a child and capture every output line into `logFilePath`. Nothing
+ * is printed to stdout/stderr — use this when the parent UI is a spinner
+ * and you want the raw build output to stay on disk for debugging.
+ *
+ * Returns the child's exit code. When `marker` is set the child is killed
+ * with SIGTERM the first time a line matches; the marker-kill exit is
+ * reported as success (0).
+ */
+export async function spawnToFile(
+  cmd: string,
+  args: string[],
+  cwd: string,
+  logFilePath: string,
+  marker?: RegExp,
+  extraEnv: Record<string, string> = {},
+): Promise<number> {
+  await Deno.writeTextFile(logFilePath, '');
+  const file = await Deno.open(logFilePath, { append: true });
+  let child: Deno.ChildProcess;
+  try {
+    child = new Deno.Command(cmd, {
+      args,
+      cwd,
+      stdin: 'null',
+      stdout: 'piped',
+      stderr: 'piped',
+      env: extraEnv,
+    }).spawn();
+  } catch {
+    file.close();
+    return 127;
+  }
+  registerChild(child);
+
+  const enc = new TextEncoder();
+  const dec = new TextDecoder();
+  let killedOnMarker = false;
+
+  const pump = async (stream: ReadableStream<Uint8Array>): Promise<void> => {
+    let carry = '';
+    for await (const chunk of stream) {
+      const text = carry + dec.decode(chunk, { stream: true });
+      const lines = text.split('\n');
+      carry = lines.pop() ?? '';
+      for (const line of lines) {
+        await file.write(enc.encode(line + '\n'));
+        if (marker && !killedOnMarker && marker.test(line)) {
+          killedOnMarker = true;
+          try {
+            child.kill('SIGTERM');
+          } catch { /* already gone */ }
+        }
+      }
+    }
+    if (carry) await file.write(enc.encode(carry + '\n'));
+  };
+
+  try {
+    const [status] = await Promise.all([
+      child.status,
+      pump(child.stdout).catch(() => {}),
+      pump(child.stderr).catch(() => {}),
+    ]);
+    unregisterChild(child);
+    if (!killedOnMarker) return status.code;
+    if (status.signal === 'SIGTERM') return 0;
+    return status.code;
+  } finally {
+    file.close();
+  }
+}
+
+/**
  * Like `spawnPrefixed` but kills the child as soon as a line matching
  * `marker` is observed on stdout or stderr.
  *
