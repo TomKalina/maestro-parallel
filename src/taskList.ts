@@ -1,14 +1,12 @@
-// Stateful in-place checklist renderer with clack-style glyphs.
+// Stateful checklist renderer driven by `log-update` (Sindre Sorhus).
+// We hand log-update a fresh "frame" string every time something
+// changes; it handles the cursor manipulation needed to overwrite the
+// previous frame in place — wrap-aware, scroll-aware, cursor-aware.
 //
-// Shows N top-level steps as a static block from the start, redrawing in
-// place as each step transitions pending → running → done/failed.
-// Sub-bullets live under the currently-running step and are kept after
-// failure (for debugging) but collapsed on success (keeps the block tight).
-//
-// Implementation: keep an in-memory model + count of lines we last wrote.
-// On each update emit ANSI cursor-up + erase + redraw of the whole block.
-// In non-TTY (CI) the renderer falls back to plain forward-only logging
-// so logs stay readable when piped to a file.
+// Non-TTY: log-update is a no-op write under the hood; we fall back to
+// forward-only logging so CI logs stay readable.
+
+import logUpdate, { createLogUpdate } from 'npm:log-update@7.0.0';
 
 import { C } from './ui.ts';
 
@@ -22,14 +20,13 @@ interface SubItem {
 interface StepModel {
   title: string;
   state: StepState;
-  /** Suffix appended after the title in done/failed state (e.g. elapsed). */
   finalSuffix?: string;
   subItems: SubItem[];
 }
 
 const GLYPH: Record<StepState, string> = {
   pending: `${C.gray}◯${C.reset}`,
-  running: `${C.cyan}◐${C.reset}`, // overwritten by spinGlyph() while ticking
+  running: `${C.cyan}◐${C.reset}`,
   done: `${C.green}◇${C.reset}`,
   failed: `${C.red}■${C.reset}`,
 };
@@ -45,18 +42,20 @@ const BAR_GRAY = `${C.gray}│${C.reset}`;
 const SPIN_FRAMES = ['◐', '◓', '◑', '◒'];
 const SPIN_INTERVAL_MS = 80;
 
-const enc = new TextEncoder();
+// log-update writes to stdout by default; route it through stderr so we
+// don't pollute pipelines that consume stdout. Cast through unknown
+// because createLogUpdate's first arg is typed as NodeJS.WriteStream,
+// but the Node-compat WritableStream wrapper around Deno.stderr quacks
+// well enough at runtime.
+const updater = createLogUpdate(Deno.stderr as unknown as NodeJS.WriteStream, {
+  showCursor: false,
+});
 
 export class TaskList {
   private steps: StepModel[];
   private tty: boolean;
   private spinFrame = 0;
   private spinTimer: number | null = null;
-  /** Anchor saved on first render; every subsequent redraw restores to it. */
-  private anchorSaved = false;
-  /** Cursor hidden between first render and close() so the rapid redraws
-   *  don't flicker. Restored on close. */
-  private cursorHidden = false;
 
   constructor(titles: string[]) {
     this.steps = titles.map((t) => ({ title: t, state: 'pending', subItems: [] }));
@@ -65,16 +64,13 @@ export class TaskList {
 
   /** Initial render — call once before any state changes. */
   render(): void {
-    if (this.tty) this.redraw();
-    else this.steps.forEach((s, i) => this.emit(this.formatStepLine(s, i, /*tty*/ false)));
+    if (this.tty) this.refresh();
+    else this.steps.forEach((s, i) => console.error(this.formatStepLine(s, i)));
   }
 
-  /** Mark a step as running and (optionally) start the spinner timer. */
-  /** Replace the title (used to embed live state text on the same row). */
   setTitle(idx: number, title: string): void {
     this.steps[idx]!.title = title;
-    if (this.tty) this.redraw();
-    else this.emit(this.formatStepLine(this.steps[idx]!, idx, false));
+    this.tickOrEmit(idx);
   }
 
   start(idx: number): void {
@@ -82,45 +78,32 @@ export class TaskList {
     if (this.tty) {
       if (this.spinTimer === null) {
         this.spinTimer = setInterval(() => this.tick(), SPIN_INTERVAL_MS);
-        // Suppress the Deno op leak from setInterval — we clear it in close().
         Deno.unrefTimer(this.spinTimer);
       }
-      this.redraw();
+      this.refresh();
     } else {
-      this.emit(`${GLYPH.running}  ${C.bold}${this.steps[idx]!.title}${C.reset}`);
+      console.error(this.formatStepLine(this.steps[idx]!, idx));
     }
   }
 
-  /** Add a sub-bullet to a step. Mark it `running` to show an active spinner glyph. */
   sub(idx: number, text: string, state: StepState = 'done'): void {
     this.steps[idx]!.subItems.push({ state, text });
-    if (this.tty) this.redraw();
-    else this.emit(`   ${SUB_GLYPH[state]}  ${text}`);
+    this.tickOrEmit(idx, `   ${SUB_GLYPH[state]}  ${text}`);
   }
 
-  /** Update a specific sub-item by its position. Use when each sub
-   *  represents a stable thing (e.g. a device) and you want to flip its
-   *  state + text without appending duplicates. */
   setSub(stepIdx: number, subIdx: number, text: string, state: StepState): void {
     const items = this.steps[stepIdx]!.subItems;
     while (items.length <= subIdx) items.push({ state: 'pending', text: '' });
     items[subIdx] = { state, text };
-    if (this.tty) this.redraw();
-    else this.emit(`   ${SUB_GLYPH[state]}  ${text}`);
+    this.tickOrEmit(stepIdx, `   ${SUB_GLYPH[state]}  ${text}`);
   }
 
-  /**
-   * Update the text (or state) of the most recent sub-item if it's still
-   * `running`; otherwise push a new running sub. Used to show live
-   * progress without bloating the visible list.
-   */
   message(idx: number, text: string): void {
     const items = this.steps[idx]!.subItems;
     const last = items[items.length - 1];
     if (last && last.state === 'running') last.text = text;
     else items.push({ state: 'running', text });
-    if (this.tty) this.redraw();
-    else this.emit(`   ${SUB_GLYPH.running}  ${text}`);
+    this.tickOrEmit(idx, `   ${SUB_GLYPH.running}  ${text}`);
   }
 
   done(idx: number, suffix?: string): void {
@@ -131,17 +114,17 @@ export class TaskList {
     this.finish(idx, 'failed', suffix);
   }
 
-  /** Stop the spinner timer + final redraw + show cursor. Call once when
-   *  everything is done. */
+  /** Stop the spinner, freeze the final frame as plain output. */
   close(): void {
     if (this.spinTimer !== null) {
       clearInterval(this.spinTimer);
       this.spinTimer = null;
     }
-    if (this.tty) this.redraw();
-    if (this.cursorHidden) {
-      Deno.stderr.writeSync(enc.encode('\x1b[?25h'));
-      this.cursorHidden = false;
+    if (this.tty) {
+      this.refresh();
+      // log-update top-level `done` finalises any updater; we use the
+      // creator-bound instance so we call its `.done` method.
+      logUpdate.done();
     }
   }
 
@@ -150,26 +133,29 @@ export class TaskList {
   private finish(idx: number, state: 'done' | 'failed', suffix?: string): void {
     this.steps[idx]!.state = state;
     this.steps[idx]!.finalSuffix = suffix;
-    // Collapse any sub-item that was still spinning so the line stops
-    // animating once the parent step is over.
     for (const s of this.steps[idx]!.subItems) {
       if (s.state === 'running') s.state = state;
     }
-    if (this.tty) this.redraw();
-    else this.emit(this.formatStepLine(this.steps[idx]!, idx, /*tty*/ false));
+    this.tickOrEmit(idx);
+  }
+
+  private tickOrEmit(idx: number, fallbackLine?: string): void {
+    if (this.tty) this.refresh();
+    else if (fallbackLine !== undefined) console.error(fallbackLine);
+    else console.error(this.formatStepLine(this.steps[idx]!, idx));
   }
 
   private tick(): void {
     this.spinFrame = (this.spinFrame + 1) % SPIN_FRAMES.length;
-    if (this.tty) this.redraw();
+    if (this.tty) this.refresh();
   }
 
   private spinGlyph(): string {
     return `${C.cyan}${SPIN_FRAMES[this.spinFrame]!}${C.reset}`;
   }
 
-  private formatStepLine(s: StepModel, _idx: number, tty: boolean): string {
-    const glyph = tty && s.state === 'running' ? this.spinGlyph() : GLYPH[s.state];
+  private formatStepLine(s: StepModel, _idx: number): string {
+    const glyph = this.tty && s.state === 'running' ? this.spinGlyph() : GLYPH[s.state];
     let title: string;
     if (s.state === 'pending') title = `${C.dim}${s.title}${C.reset}`;
     else if (s.state === 'running') title = `${C.bold}${s.title}${C.reset}`;
@@ -178,32 +164,23 @@ export class TaskList {
     return `${glyph}  ${title}${suffix}`;
   }
 
-  private redraw(): void {
-    if (!this.anchorSaved) {
-      // First draw — hide cursor, save anchor at the top of our block.
-      Deno.stderr.writeSync(enc.encode('\x1b[?25l\x1b[s'));
-      this.anchorSaved = true;
-      this.cursorHidden = true;
-    } else {
-      // Restore cursor to the saved anchor, clear from there to end of
-      // screen. No line-counting — robust against any stray stderr
-      // writes between redraws.
-      Deno.stderr.writeSync(enc.encode('\x1b[u\x1b[J'));
-    }
+  private renderFrame(): string {
+    const lines: string[] = [];
     for (let i = 0; i < this.steps.length; i++) {
       const s = this.steps[i]!;
-      this.emit(this.formatStepLine(s, i, /*tty*/ true));
+      lines.push(this.formatStepLine(s, i));
       const showSubs = s.state === 'running' || s.state === 'failed';
       if (showSubs) {
         for (const sub of s.subItems) {
           const sg = sub.state === 'running' ? this.spinGlyph() : SUB_GLYPH[sub.state];
-          this.emit(`${BAR_GRAY}  ${sg}  ${sub.text}`);
+          lines.push(`${BAR_GRAY}  ${sg}  ${sub.text}`);
         }
       }
     }
+    return lines.join('\n');
   }
 
-  private emit(content: string): void {
-    Deno.stderr.writeSync(enc.encode(content + '\n'));
+  private refresh(): void {
+    updater(this.renderFrame());
   }
 }
