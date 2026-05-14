@@ -376,9 +376,14 @@ export async function buildAndInstall(
     // Wrap report to also push status into onDeviceState so the
     // default hook's clack spinner stays disabled (it checks
     // `!!ctx.report`) — otherwise two renderers fight for the cursor.
+    // Broadcast the status to EVERY device in the group: the work
+    // (gradle / xcodebuild / Metro bundling) produces one artifact
+    // for the whole group, so each row should mirror the same progress.
     const hookReport = (msg: string): void => {
       opts.report?.(msg);
-      opts.onDeviceState?.(first.id, 'building', msg);
+      for (const d of groupDevices) {
+        opts.onDeviceState?.(d.id, 'building', msg);
+      }
     };
     const startedAt = Date.now();
     const artifact = await hooks.buildAndInstallFirst({
