@@ -304,7 +304,7 @@ export async function buildAndInstall(
     }
     // First device's group build returned an artifact — the hook also
     // installed it on the first device.
-    opts.onDeviceState?.(first.id, 'installed', `built (${elapsed}s)`);
+    opts.onDeviceState?.(first.id, 'installed', `${elapsed}s`);
 
     if (rest.length === 0) continue;
 
