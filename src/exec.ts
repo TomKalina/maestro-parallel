@@ -123,6 +123,7 @@ export async function spawnToFile(
   logFilePath: string,
   marker?: RegExp,
   extraEnv: Record<string, string> = {},
+  onLine?: (line: string) => void,
 ): Promise<number> {
   await Deno.writeTextFile(logFilePath, '');
   const file = await Deno.open(logFilePath, { append: true });
@@ -154,6 +155,11 @@ export async function spawnToFile(
       carry = lines.pop() ?? '';
       for (const line of lines) {
         await file.write(enc.encode(line + '\n'));
+        if (onLine) {
+          try {
+            onLine(line);
+          } catch { /* swallow callback errors */ }
+        }
         if (marker && !killedOnMarker && marker.test(line)) {
           killedOnMarker = true;
           try {
@@ -162,7 +168,14 @@ export async function spawnToFile(
         }
       }
     }
-    if (carry) await file.write(enc.encode(carry + '\n'));
+    if (carry) {
+      await file.write(enc.encode(carry + '\n'));
+      if (onLine) {
+        try {
+          onLine(carry);
+        } catch { /* swallow */ }
+      }
+    }
   };
 
   try {
