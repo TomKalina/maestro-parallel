@@ -171,13 +171,13 @@ export class TaskList {
 
   private redraw(): void {
     if (this.linesWritten > 0) {
-      // Erase each previously-written line individually. The single
-      // up-N + J approach broke on some terminals when an external
-      // write left the cursor mid-line — clearing each line with
-      // \x1b[2K is more defensive. Pattern per line: \r (column 0),
-      // \x1b[2K (clear entire line), \x1b[1A (up one row).
-      let seq = '\r\x1b[2K';
-      for (let i = 1; i < this.linesWritten; i++) {
+      // After our last emit ended with `\n`, the cursor sits one line
+      // below our block. Walk up N times, clearing each line. Cursor
+      // ends at the first row of our previous block, ready to overwrite.
+      // The previous off-by-one (loop ran N-1 times) left the top row
+      // of the block uncleared — visible as a stale duplicate.
+      let seq = '\r';
+      for (let i = 0; i < this.linesWritten; i++) {
         seq += '\x1b[1A\x1b[2K';
       }
       Deno.stderr.writeSync(enc.encode(seq));
