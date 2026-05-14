@@ -271,6 +271,9 @@ export async function buildAndInstall(
     const hooks = config.build?.[platform];
     if (!hooks) {
       sayLine(`${C.yellow}skip group ${groupKey}: no config.build.${platform} configured${C.reset}`);
+      for (const d of groupDevices) {
+        opts.onDeviceState?.(d.id, 'failed', `no config.build.${platform}`);
+      }
       return;
     }
 

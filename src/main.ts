@@ -503,12 +503,18 @@ export async function runMaestroParallel(
   const merged = await mergeJunit(results, outBase);
   await summarize(results, outBase, merged);
 
-  const failed = results.filter((r) => r.exitCode !== 0).length;
-  const passed = results.length - failed;
-  if (failed === 0) {
-    outro(`${passed}/${results.length} devices passed`, true);
+  // Devices that died in the build/install stage never produced a
+  // RunResult; count them as failed in the headline so the summary
+  // total = N devices the user picked, and exit code reflects partial
+  // never-ran failures.
+  const ranFailed = results.filter((r) => r.exitCode !== 0).length;
+  const totalFailed = ranFailed + failedBeforeTest.size;
+  const totalDevices = chosen.length;
+  const passed = totalDevices - totalFailed;
+  if (totalFailed === 0) {
+    outro(`${passed}/${totalDevices} devices passed`, true);
   } else {
-    outro(`${passed}/${results.length} devices passed — ${failed} failed`, false);
+    outro(`${passed}/${totalDevices} devices passed — ${totalFailed} failed`, false);
   }
-  return failed > 0 ? 1 : 0;
+  return totalFailed > 0 ? 1 : 0;
 }
