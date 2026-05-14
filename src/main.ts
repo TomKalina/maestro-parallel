@@ -21,7 +21,7 @@ import {
 } from './setup.ts';
 import { setupIosSim } from './setupIosSim.ts';
 import type { Device, RunResult } from './types.ts';
-import { C, fatal, log, PALETTE } from './ui.ts';
+import { fatal, info, intro, note, outro, PALETTE, step, warn } from './ui.ts';
 
 export interface RunOptions {
   /** Project root. Default `Deno.cwd()`. */
@@ -77,6 +77,7 @@ export async function runMaestroParallel(
   config: MaestroParallelConfig,
   options: RunOptions = {},
 ): Promise<number> {
+  intro();
   const cwd = options.cwd ?? Deno.cwd();
   // Do not Deno.chdir(cwd): mutating process-wide cwd breaks repeat /
   // concurrent calls from `index.ts`. All path resolution uses join(cwd, …)
@@ -109,6 +110,7 @@ export async function runMaestroParallel(
   // local build (when a matching `e2e-test` / `e2e` / `preview` profile
   // exists in `eas.json`) and falls back to `expo run:*` for plain Expo
   // projects.
+  let detectedDescription: string | undefined;
   if (!augmented.build?.android || !augmented.build?.ios) {
     const defaults = await buildDefaultHooks(
       cwd,
@@ -126,18 +128,19 @@ export async function runMaestroParallel(
         filled.push('ios');
       }
       if (filled.length > 0) {
-        log(`${C.bold}${C.cyan}detected build:${C.reset} ${defaults.description} ${C.dim}(for ${filled.join(' + ')})${C.reset}`);
+        detectedDescription = `${defaults.description} (for ${filled.join(' + ')})`;
       }
     }
   }
 
   const resolved = resolveConfig(augmented);
 
-  log(`${C.dim}cwd:${C.reset} ${cwd}`);
-  log(`${C.dim}flows:${C.reset} ${resolved.flowsDir}`);
-  if (resolved.bundleId) {
-    log(`${C.dim}bundleId:${C.reset} ${resolved.bundleId}`);
-  }
+  const configLines: Record<string, string> = {
+    cwd,
+    flows: resolved.flowsDir,
+  };
+  if (resolved.bundleId) configLines.bundleId = resolved.bundleId;
+  if (detectedDescription) configLines.build = detectedDescription;
 
   // Resolve the build mode. Source priority:
   //   1. RunOptions.buildMode (CLI flag forwarded by cli.ts)
@@ -159,8 +162,8 @@ export async function runMaestroParallel(
   } else if (resolved.buildMode) {
     buildMode = resolved.buildMode;
   } else if (!haveBuildHooks) {
-    log(
-      `${C.yellow}no build.android / build.ios hooks configured — skipping build & install. Add a config to enable release builds (see examples/expo.config.ts).${C.reset}`,
+    warn(
+      'no build.android / build.ios hooks configured — skipping build & install. Add a config to enable release builds (see examples/expo.config.ts).',
     );
     buildMode = 'skip';
   } else {
@@ -171,25 +174,23 @@ export async function runMaestroParallel(
       'release build requested, but no build.android / build.ios hooks are configured. Add a build hook in maestroparallel.config.ts (see examples/expo.config.ts or examples/eas-local.config.ts), or pass --skip-build to run flows against the already-installed app.',
     );
   }
-  log(`${C.dim}buildMode:${C.reset} ${C.bold}${buildMode}${C.reset}`);
+  configLines.buildMode = buildMode;
+  note('configuration', configLines);
 
   let chosen: Device[];
   if (options.devices && options.devices.length > 0) {
     chosen = options.devices;
   } else {
-    log(`${C.dim}discovering devices...${C.reset}`);
+    info('discovering devices…');
     // Maestro 2.5.1 cannot match ANY device by UDID when adb has an
     // unauthorized/offline entry in its list — every `--device` lookup
     // returns "not connected". Warn loudly so the user fixes it before tests.
     const broken = await detectBrokenAndroidDevices();
     if (broken.length > 0) {
-      log(
-        `${C.yellow}warning: adb has ${broken.length} non-ready device(s): ${
+      warn(
+        `adb has ${broken.length} non-ready device(s): ${
           broken.map((b) => `${b.id} (${b.state})`).join(', ')
-        }${C.reset}`,
-      );
-      log(
-        `${C.yellow}    Maestro 2.5.x fails on these. Unplug them, accept the USB-debug prompt, or run 'adb -s <id> reconnect'.${C.reset}`,
+        } — Maestro 2.5.x fails on these. Unplug them, accept the USB-debug prompt, or run 'adb -s <id> reconnect'.`,
       );
     }
     const devs = await discoverDevices();
@@ -198,11 +199,11 @@ export async function runMaestroParallel(
     }
     if (options.allDevices) {
       chosen = devs;
-      log(`${C.dim}using all ${devs.length} discovered device(s)${C.reset}`);
+      info(`using all ${devs.length} discovered device(s)`);
     } else if (devs.length === 1) {
       // Skip the picker when there's nothing to choose from.
       chosen = devs;
-      log(`${C.dim}only 1 device found, running on it directly${C.reset}`);
+      info('only 1 device found, running on it directly');
     } else {
       const last = await readLastSelection(cwd);
       chosen = await pickDevices(devs, last);
@@ -233,11 +234,13 @@ export async function runMaestroParallel(
   logPreflight(issues);
 
   if (buildMode === 'release' && resolved.build) {
+    step('Build & install');
     await buildAndInstall(chosen, cwd, resolved, colorOf, prefixWidth, buildMode);
   } else if (buildMode === 'skip') {
-    log(`${C.dim}skip build — using whatever's already installed${C.reset}`);
+    info("skip build — using whatever's already installed");
   }
 
+  step('Prepare devices');
   await wakeAndroidDevices(chosen);
   const iosTunnels: IosTunnelHandle = await wakeIosPhysicalTunnels(chosen);
   warnIosPhysicalAutoLock(chosen);
@@ -249,17 +252,17 @@ export async function runMaestroParallel(
   // dismiss it. Sims only: physical iOS can't be configured programmatically.
   const iosSims = chosen.filter((d) => d.platform === 'ios' && d.kind === 'simulator');
   if (iosSims.length > 0) {
-    log(
-      `${C.dim}configuring ${iosSims.length} iOS sim(s): disable AutoFill, reset keychain, keep awake${C.reset}`,
+    info(
+      `configuring ${iosSims.length} iOS sim(s): disable AutoFill, reset keychain, keep awake`,
     );
     await Promise.all(iosSims.map((d) => setupIosSim(d.id)));
   }
   const iosPhysical = chosen.filter((d) => d.platform === 'ios' && d.kind === 'usb');
   if (iosPhysical.length > 0) {
-    log(
-      `${C.yellow}note: physical iOS (${
+    warn(
+      `physical iOS (${
         iosPhysical.map((d) => d.name).join(', ')
-      }) — disable AutoFill manually: Settings → Passwords → Password Options → AutoFill Passwords (off).${C.reset}`,
+      }) — disable AutoFill manually: Settings → Passwords → Password Options → AutoFill Passwords (off).`,
     );
   }
 
@@ -290,6 +293,8 @@ export async function runMaestroParallel(
   };
   Deno.addSignalListener('SIGINT', onSig);
   Deno.addSignalListener('SIGTERM', onSig);
+
+  step('Maestro tests');
 
   const androidDevices = chosen.filter((d) => d.platform === 'android');
   const iosDevices = chosen.filter((d) => d.platform === 'ios');
@@ -383,5 +388,12 @@ export async function runMaestroParallel(
   const merged = await mergeJunit(results, outBase);
   await summarize(results, outBase, merged);
 
-  return results.some((r) => r.exitCode !== 0) ? 1 : 0;
+  const failed = results.filter((r) => r.exitCode !== 0).length;
+  const passed = results.length - failed;
+  if (failed === 0) {
+    outro(`${passed}/${results.length} devices passed`, true);
+  } else {
+    outro(`${passed}/${results.length} devices passed — ${failed} failed`, false);
+  }
+  return failed > 0 ? 1 : 0;
 }
