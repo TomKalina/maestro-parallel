@@ -383,16 +383,21 @@ export async function runMaestroParallel(
   // spaced. Sequential queues already have a natural gap (next starts
   // after previous finishes), so they don't need it.
   //
-  // Delay is CUMULATIVE within a batch: i=0 → 0 ms, i=1 → stagger,
-  // i=2 → 2*stagger, … Otherwise parallel callers all await the same
-  // fixed timeout and land in the same second together.
+  // Gap is incremental — each call advances a shared timestamp by
+  // `stagger`, so the N-th call starts at most `stagger` ms after the
+  // (N-1)-th regardless of how many calls preceded it. Previously the
+  // delay was cumulative (`stagger * i`), which made the 10th of 10
+  // devices wait 20 s for no reason.
   const stagger = resolved.processStartStaggerMs;
   const makeStagger = () => {
-    let idx = 0;
+    let nextStartAt = 0;
     return async <T>(fn: () => Promise<T>): Promise<T> => {
-      const i = idx++;
-      if (i > 0 && stagger > 0) {
-        await new Promise<void>((r) => setTimeout(r, stagger * i));
+      if (stagger > 0) {
+        const now = Date.now();
+        const target = Math.max(now, nextStartAt);
+        nextStartAt = target + stagger;
+        const wait = target - now;
+        if (wait > 0) await new Promise<void>((r) => setTimeout(r, wait));
       }
       return await fn();
     };
