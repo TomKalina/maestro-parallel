@@ -10,30 +10,19 @@ import { run } from './exec.ts';
 import { C, log } from './ui.ts';
 
 export async function setupIosSim(udid: string): Promise<void> {
-  // Different iOS versions read the AutoFill toggle from different defaults
-  // domains; write both so the setting sticks regardless of the runtime.
-  await run('xcrun', [
-    'simctl',
-    'spawn',
-    udid,
-    'defaults',
-    'write',
-    'com.apple.preferences.password.RemoteUI.SimulatorBundleSettings',
-    'AutoFillPasswords',
-    '-bool',
-    'false',
-  ]);
-  await run('xcrun', [
-    'simctl',
-    'spawn',
-    udid,
-    'defaults',
-    'write',
-    'com.apple.AutoFillFramework',
-    'AutoFillEnabled',
-    '-bool',
-    'false',
-  ]);
+  // iOS 17 split the AutoFill toggle into two keys; iOS 26 added a
+  // 'SaveSuggestedPassword' key for the post-submit "Save Password?"
+  // overlay. Write every variant so all runtimes pick up at least one.
+  const defaultsWrites: Array<[domain: string, key: string]> = [
+    ['com.apple.preferences.password.RemoteUI.SimulatorBundleSettings', 'AutoFillPasswords'],
+    ['com.apple.preferences.password.RemoteUI.SimulatorBundleSettings', 'AutoFillPasswordsAndPasskeys'],
+    ['com.apple.preferences.password.RemoteUI.SimulatorBundleSettings', 'SaveSuggestedPassword'],
+    ['com.apple.AutoFillFramework', 'AutoFillEnabled'],
+    ['com.apple.AutoFillFramework', 'SaveSuggestedPassword'],
+  ];
+  for (const [domain, key] of defaultsWrites) {
+    await run('xcrun', ['simctl', 'spawn', udid, 'defaults', 'write', domain, key, '-bool', 'false']);
+  }
   // Wipe any saved credential so the prompt has nothing to offer to save.
   await run('xcrun', ['simctl', 'keychain', udid, 'reset']);
   // Keep the simulator's screen awake during the run. Without this the sim
@@ -50,6 +39,10 @@ export async function setupIosSim(udid: string): Promise<void> {
     '-bool',
     'true',
   ]);
+  // Force SpringBoard to re-read the defaults — without a respring the
+  // already-running process keeps the cached values and the overlay
+  // still fires on form submit.
+  await run('xcrun', ['simctl', 'spawn', udid, 'killall', '-HUP', 'SpringBoard']);
 }
 
 /** Run setupIosSim against every currently-booted simulator. CLI helper. */
