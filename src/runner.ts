@@ -5,7 +5,7 @@
 import { join } from '@std/path';
 import type { ResolvedConfig } from './config.ts';
 import { devicePrefix } from './devices.ts';
-import { run, spawnPrefixedTee } from './exec.ts';
+import { run, spawnPrefixedTee, spawnSilentWithProgress } from './exec.ts';
 import type { Device, GroupRunResult, Platform, RunResult } from './types.ts';
 import { C, log } from './ui.ts';
 
@@ -90,6 +90,14 @@ export async function makeShardConfig(
   return dest;
 }
 
+/** Live event emitted as Maestro flows finish on a device. */
+export interface FlowEvent {
+  device: Device;
+  status: 'pass' | 'fail';
+  flow: string;
+  durationMs: number;
+}
+
 // Run Maestro on a single device. One process per device, plain `maestro test`
 // without --shard-all. Maestro 2.5+ fixed the Android dadb host port race so
 // multiple Maestro processes can target several Android devices at once.
@@ -100,6 +108,7 @@ export async function runDevice(
   cwd: string,
   outBase: string,
   config: ResolvedConfig,
+  onEvent?: (e: FlowEvent) => void,
 ): Promise<RunResult> {
   const outDir = join(outBase, deviceSlug(d));
   await Deno.mkdir(outDir, { recursive: true });
@@ -150,10 +159,13 @@ export async function runDevice(
   // that lack an explicit `- launchApp` step (Maestro does not auto-launch
   // from `appId` alone) sit on the home screen and fail with "Element not
   // found". `monkey` is used on Android because it resolves the launcher
-  // activity itself — no need to know the activity name.
+  // activity itself — no need to know the activity name. In silent mode
+  // (caller subscribes to onEvent), skip the per-launch log line so the
+  // shared spinner stays clean.
+  const silent = !!onEvent;
   if (d.platform === 'ios' && d.kind === 'simulator' && config.bundleId) {
     const r = await run('xcrun', ['simctl', 'launch', d.id, config.bundleId]);
-    if (r.code === 0) {
+    if (r.code === 0 && !silent) {
       log(`${prefix}${C.dim}launched ${config.bundleId} on sim${C.reset}`);
     }
   } else if (d.platform === 'android' && config.bundleId) {
@@ -168,7 +180,7 @@ export async function runDevice(
       'android.intent.category.LAUNCHER',
       '1',
     ]);
-    if (r.code === 0) {
+    if (r.code === 0 && !silent) {
       log(`${prefix}${C.dim}launched ${config.bundleId} on android${C.reset}`);
     }
   } else if (isIosPhysical && config.bundleId) {
@@ -181,7 +193,7 @@ export async function runDevice(
       d.id,
       config.bundleId,
     ]);
-    if (r.code === 0) {
+    if (r.code === 0 && !silent) {
       log(`${prefix}${C.dim}launched ${config.bundleId} on ${d.name}${C.reset}`);
     }
   }
@@ -214,19 +226,43 @@ export async function runDevice(
     }
   }
 
-  log(`${prefix}${C.bold}start${C.reset} ${d.id}`);
-
-  const exitCode = await spawnPrefixedTee(
-    'maestro',
-    args,
-    cwd,
-    prefix,
-    join(outDir, 'run.log'),
-    { NO_COLOR: '1' },
-  );
-  log(
-    `${prefix}${exitCode === 0 ? C.green + 'pass' : C.red + 'fail'} (exit ${exitCode})${C.reset}`,
-  );
+  // If a caller subscribes via onEvent we go silent — they're rendering
+  // their own progress UI. Otherwise fall back to the per-line streamed
+  // output so library users get the legacy behaviour.
+  const logPath = join(outDir, 'run.log');
+  let exitCode: number;
+  if (onEvent) {
+    exitCode = await spawnSilentWithProgress(
+      'maestro',
+      args,
+      cwd,
+      logPath,
+      (line) => {
+        const m = line.match(/^\[(Passed|Failed)\]\s+(\S+)\s+\((\d+)s\)/);
+        if (!m) return;
+        onEvent({
+          device: d,
+          status: m[1] === 'Passed' ? 'pass' : 'fail',
+          flow: m[2]!,
+          durationMs: Number(m[3]) * 1000,
+        });
+      },
+      { NO_COLOR: '1' },
+    );
+  } else {
+    log(`${prefix}${C.bold}start${C.reset} ${d.id}`);
+    exitCode = await spawnPrefixedTee(
+      'maestro',
+      args,
+      cwd,
+      prefix,
+      logPath,
+      { NO_COLOR: '1' },
+    );
+    log(
+      `${prefix}${exitCode === 0 ? C.green + 'pass' : C.red + 'fail'} (exit ${exitCode})${C.reset}`,
+    );
+  }
   return { device: d, exitCode, outDir };
 }
 

@@ -181,6 +181,75 @@ export async function spawnToFile(
 }
 
 /**
+ * Spawn a child silently (no terminal output), tee everything into
+ * `logFilePath`, and call `onLine` for every output line. Useful when a
+ * UI spinner shows aggregated progress and the per-line stream stays on
+ * disk for debugging.
+ */
+export async function spawnSilentWithProgress(
+  cmd: string,
+  args: string[],
+  cwd: string,
+  logFilePath: string,
+  onLine: (line: string) => void,
+  extraEnv: Record<string, string> = {},
+): Promise<number> {
+  await Deno.writeTextFile(logFilePath, '');
+  const file = await Deno.open(logFilePath, { append: true });
+  let child: Deno.ChildProcess;
+  try {
+    child = new Deno.Command(cmd, {
+      args,
+      cwd,
+      stdin: 'null',
+      stdout: 'piped',
+      stderr: 'piped',
+      env: extraEnv,
+    }).spawn();
+  } catch {
+    file.close();
+    return 127;
+  }
+  registerChild(child);
+
+  const enc = new TextEncoder();
+  const dec = new TextDecoder();
+
+  const pump = async (stream: ReadableStream<Uint8Array>): Promise<void> => {
+    let carry = '';
+    for await (const chunk of stream) {
+      const text = carry + dec.decode(chunk, { stream: true });
+      const lines = text.split('\n');
+      carry = lines.pop() ?? '';
+      for (const line of lines) {
+        await file.write(enc.encode(line + '\n'));
+        try {
+          onLine(line);
+        } catch { /* swallow callback errors so they don't break the pump */ }
+      }
+    }
+    if (carry) {
+      await file.write(enc.encode(carry + '\n'));
+      try {
+        onLine(carry);
+      } catch { /* same */ }
+    }
+  };
+
+  try {
+    const [{ code }] = await Promise.all([
+      child.status,
+      pump(child.stdout).catch(() => {}),
+      pump(child.stderr).catch(() => {}),
+    ]);
+    unregisterChild(child);
+    return code;
+  } finally {
+    file.close();
+  }
+}
+
+/**
  * Like `spawnPrefixed` but kills the child as soon as a line matching
  * `marker` is observed on stdout or stderr.
  *

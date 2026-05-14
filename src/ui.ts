@@ -72,6 +72,18 @@ export function step(title: string): void {
   clack.log.step(`${C.bold}${title}${C.reset}`);
 }
 
+/** Print an outline / checklist of the steps the run is about to execute.
+ *  Each item shows as a bullet inside a clack `note` block. */
+export function plan(steps: string[]): void {
+  const body = steps.map((s, i) => `${C.dim}${i + 1}.${C.reset} ${s}`).join('\n');
+  clack.note(body, 'Plan');
+}
+
+/** Helper that titles spinners and step messages with `[N/M] title`. */
+export function stepLabel(idx: number, total: number, title: string): string {
+  return `${C.dim}[${idx}/${total}]${C.reset} ${title}`;
+}
+
 export function info(msg: string): void {
   clack.log.info(msg);
 }
