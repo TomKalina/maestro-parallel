@@ -279,12 +279,19 @@ export async function runMaestroParallel(
         if (!d) return;
         const i = deviceIndex.get(deviceId)!;
         switch (state) {
-          case 'building':
+          case 'building': {
+            // Keep total row width inside common terminal columns so
+            // log-update doesn't see wrap and miscount its redraw region.
+            const MAX_DETAIL = 50;
+            const tail = detail && detail.length > MAX_DETAIL
+              ? detail.slice(0, MAX_DETAIL - 1) + '…'
+              : detail;
             updateRow(
               d,
-              `${C.cyan}building${C.reset}${detail ? ` ${C.dim}(${detail})${C.reset}` : ''}`,
+              `${C.cyan}building${C.reset}${tail ? ` ${C.dim}(${tail})${C.reset}` : ''}`,
             );
             break;
+          }
           case 'waiting':
             // Legacy state — current setup.ts emits 'building' for the
             // whole group instead. Keep handler for back-compat with
