@@ -4,15 +4,19 @@
 [![npm](https://img.shields.io/npm/v/maestro-parallel.svg)](https://www.npmjs.com/package/maestro-parallel)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-Run [Maestro](https://maestro.mobile.dev/) E2E flows on every connected Android and iOS device in
-parallel. Zero config in an Expo / React Native project — auto-detect build, install, run,
-summarise.
+**One command. Every device. Real release builds.** Run [Maestro](https://maestro.mobile.dev/) E2E flows on every connected Android + iOS device in parallel — zero config in Expo / React Native projects.
+
+<!-- TODO(demo): replace with VHS-recorded GIF of a real parallel run -->
+<!-- ![maestro-parallel demo](./docs/static/img/demo.gif) -->
 
 ## Quickstart
 
 ```bash
-# Install (Deno required; Node distribution is on the roadmap)
+# JSR (Deno >=2.0)
 deno install -g -A -n maestro-parallel jsr:@kaln/maestro-parallel/cli
+
+# or npm (Node >=18.17)
+npm i -g maestro-parallel
 
 # In your app folder (needs .maestro/ flows + a connected device or booted sim)
 maestro-parallel
@@ -114,7 +118,7 @@ Team ID, or in Xcode → Settings → Accounts.
 
 ## Requirements
 
-- [Deno](https://deno.com/) ≥ 2.0 (`brew install deno` on macOS). Node support is on the roadmap.
+- [Deno](https://deno.com/) ≥ 2.0 (`brew install deno`) **or** Node ≥ 18.17 via `npm i -g maestro-parallel`.
 - [Maestro CLI](https://maestro.mobile.dev/getting-started/installing-maestro) on `PATH`.
 - `adb` (Android), `xcrun` (iOS, ships with Xcode).
 - Apple Developer Team ID for physical iPhones.
