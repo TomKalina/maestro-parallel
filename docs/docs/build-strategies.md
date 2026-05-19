@@ -23,7 +23,7 @@ mp watches for `› Opening … on <device>` then SIGTERMs Rock (it would otherw
 
 ## EAS local
 
-Detected when `eas.json` has a profile named `e2e-test`, `e2e`, or `preview`.
+Detected when `eas.json` has a profile named `e2e-test`, `e2e`, `e2e-tests`, or `preview` (first match wins, in that order).
 
 ```
 pnpm exec eas build --profile <profile> --platform ios --local

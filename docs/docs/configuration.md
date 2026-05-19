@@ -47,7 +47,7 @@ Maestro flows directory or single flow file, relative to cwd. Default `.maestro`
 Where to write per-run output. Default `.maestro/output`.
 
 ### `keepRuns?: number`
-Past `parallel-*` runs kept in `outputDir`. Default 3.
+Past `parallel-*` runs kept in `outputDir`. Default 3. Must be a positive integer (≥ 1) — otherwise prune would delete the current run directory and config load fails fast.
 
 ### `maestroConfigPath?: string`
 Path to project's existing Maestro config. Used when `iosShardAll` is true — `executionOrder.flowsOrder` is stripped from a temp copy so `--shard-all` works. Default `.maestro/config.yaml`.
@@ -74,7 +74,7 @@ Default `false`. Run one Maestro process with `--shard-all=N` instead of one pro
 Delay (ms) between starting consecutive Maestro processes. Workaround for the Maestro 2.5.x per-second session-log-dir race. Default 2000. Set to 0 to disable.
 
 ### `buildMode?: 'release' | 'skip'`
-Pre-selected build mode. CLI `--release` / `--skip-build` override.
+Pre-selected build mode (`release` = run the build hook, `skip` = assume the app is already installed). CLI `--skip-build` overrides to `skip`. In a non-TTY environment with no explicit choice, the default is `release`.
 
 ### `buildStrategy?: 'auto' | 'rock' | 'eas' | 'expo'`
 Pin the auto-detect choice. Default `'auto'` (priority: rock > eas > expo). Use when your project has artifacts of more than one strategy.

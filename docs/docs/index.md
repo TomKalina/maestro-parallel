@@ -32,4 +32,4 @@ Maestro itself can target only one device per process. Running 5 devices means l
 
 ## Source
 
-[github.com/TomKalina/maestro-parallel](https://github.com/TomKalina/maestro-parallel) — MIT licence.
+[github.com/TomKalina/maestro-parallel](https://github.com/TomKalina/maestro-parallel) — Apache-2.0.
