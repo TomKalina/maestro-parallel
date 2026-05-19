@@ -7,12 +7,14 @@ title: Getting started
 ## Requirements
 
 - macOS (for iOS testing) / Linux / Windows (Android only)
-- [Deno](https://deno.com) ≥ 1.45 — `brew install deno`
+- [Deno](https://deno.com) ≥ 2.0 — `brew install deno` (for the JSR distribution)
 - [Maestro CLI](https://maestro.mobile.dev) — `curl -fsSL https://get.maestro.mobile.dev | bash`
 - For iOS: Xcode + at least one iOS simulator runtime installed
 - For Android: `adb` (Android SDK platform-tools)
 
 ## Install
+
+JSR (Deno):
 
 ```bash
 deno install --global --reload --allow-all -n maestro-parallel \
@@ -23,6 +25,14 @@ Or run without installing:
 
 ```bash
 deno run -A jsr:@kaln/maestro-parallel/cli
+```
+
+npm (Node ≥ 18.17):
+
+```bash
+npm i -g maestro-parallel
+# or one-shot
+npx maestro-parallel
 ```
 
 ## First run
@@ -55,3 +65,19 @@ See [CLI reference](./cli.md) for the full list.
 ## Project config
 
 Optional: drop a `maestroparallel.config.ts` at the repo root to pin build strategy, env vars, Maestro env, Apple Team ID, and more. See [Configuration](./configuration.md).
+
+## iOS simulator auto-preflight
+
+Every selected sim is configured before flows run — no opt-in needed:
+
+- `AutoFillPasswords = false` in both relevant defaults domains. Kills the "Save Password?" / "AutoFill Passwords" overlay that otherwise blocks Maestro after a credentials submit.
+- Keychain reset via `xcrun simctl keychain <udid> reset`.
+- `SBIdleTimerDisabled = true` so the sim doesn't auto-lock mid-test.
+
+You can also run it on its own:
+
+```bash
+maestro-parallel setup-ios-sim
+```
+
+Physical iOS can't be configured programmatically — disable AutoFill manually under **Settings → Passwords → Password Options → AutoFill Passwords**.

@@ -16,10 +16,6 @@ export default {
 
 The var is merged into the build child process automatically.
 
-## Use Expo dev-client builds
-
-mp matches the `Opening … on <device>` log line that both plain `expo run:*` and `expo-dev-client` print. Nothing extra to configure — dev-client deep-link URLs (`exp+<scheme>://expo-development-client/?url=...`) are recognised.
-
 ## Sign physical iOS
 
 mp builds the app via the auto-detected strategy; iOS code signing is handled by Xcode automatic signing or by your custom hook. mp itself only needs the Team ID for Maestro's WebDriver build:
