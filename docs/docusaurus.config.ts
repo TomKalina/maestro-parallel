@@ -11,7 +11,7 @@ const config: Config = {
     v4: true,
   },
 
-  url: 'https://maestro-parallel.kaln.cz',
+  url: 'https://maestro-parallel.pages.dev',
   baseUrl: '/',
 
   organizationName: 'TomKalina',
