@@ -1,30 +1,76 @@
 /**
- * Any CSS included here will be global. The classic template
- * bundles Infima by default. Infima is a CSS framework designed to
- * work well for content-centric websites.
+ * Project color palette + Docusaurus (Infima) overrides.
+ *
+ * Use `--mp-*` tokens everywhere in custom CSS (see src/pages/*.module.css).
+ * Docusaurus components (sidebar, headings, code blocks, doc links) read from
+ * the `--ifm-*` family — those are mirrored to the same brand palette below so
+ * the whole site stays coherent.
  */
 
-/* You can override the default Infima variables here. */
 :root {
-  --ifm-color-primary: #2e8555;
-  --ifm-color-primary-dark: #29784c;
-  --ifm-color-primary-darker: #277148;
-  --ifm-color-primary-darkest: #205d3b;
-  --ifm-color-primary-light: #33925d;
-  --ifm-color-primary-lighter: #359962;
-  --ifm-color-primary-lightest: #3cad6e;
+  /* Brand — indigo */
+  --mp-brand: #6366f1;
+  --mp-brand-hover: #4f46e5;
+  --mp-brand-active: #4338ca;
+  --mp-brand-fg: #ffffff;
+
+  /* Surfaces */
+  --mp-bg: #ffffff;
+  --mp-surface: #f8fafc;
+  --mp-surface-2: #f1f5f9;
+
+  /* Text */
+  --mp-text: #0f172a;
+  --mp-text-muted: #475569;
+  --mp-text-faint: #94a3b8;
+
+  /* Lines */
+  --mp-border: rgba(15, 23, 42, 0.10);
+  --mp-border-strong: rgba(15, 23, 42, 0.18);
+
+  /* Status */
+  --mp-success: #10b981;
+  --mp-warning: #f59e0b;
+  --mp-danger: #ef4444;
+
+  /* Map to Infima primary scale so doc-page links, sidebar selection, code
+     block borders, and admonitions all share the brand. */
+  --ifm-color-primary: var(--mp-brand);
+  --ifm-color-primary-dark: #5457ee;
+  --ifm-color-primary-darker: var(--mp-brand-hover);
+  --ifm-color-primary-darkest: var(--mp-brand-active);
+  --ifm-color-primary-light: #7c7ff3;
+  --ifm-color-primary-lighter: #9295f6;
+  --ifm-color-primary-lightest: #b8baf9;
+
   --ifm-code-font-size: 95%;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+  --docusaurus-highlighted-code-line-bg: rgba(99, 102, 241, 0.10);
 }
 
-/* For readability concerns, you should choose a lighter palette in dark mode. */
 [data-theme='dark'] {
-  --ifm-color-primary: #25c2a0;
-  --ifm-color-primary-dark: #21af90;
-  --ifm-color-primary-darker: #1fa588;
-  --ifm-color-primary-darkest: #1a8870;
-  --ifm-color-primary-light: #29d5b0;
-  --ifm-color-primary-lighter: #32d8b4;
-  --ifm-color-primary-lightest: #4fddbf;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+  --mp-brand: #818cf8;
+  --mp-brand-hover: #a5b4fc;
+  --mp-brand-active: #c7d2fe;
+  --mp-brand-fg: #0b1020;
+
+  --mp-bg: #0b1020;
+  --mp-surface: #131a2e;
+  --mp-surface-2: #1a223a;
+
+  --mp-text: #e5e7eb;
+  --mp-text-muted: #94a3b8;
+  --mp-text-faint: #64748b;
+
+  --mp-border: rgba(229, 231, 235, 0.10);
+  --mp-border-strong: rgba(229, 231, 235, 0.18);
+
+  --ifm-color-primary: var(--mp-brand);
+  --ifm-color-primary-dark: #6b78f6;
+  --ifm-color-primary-darker: #5b6af5;
+  --ifm-color-primary-darkest: #3b4ce3;
+  --ifm-color-primary-light: #97a0fa;
+  --ifm-color-primary-lighter: #adb4fb;
+  --ifm-color-primary-lightest: #d0d5fd;
+
+  --docusaurus-highlighted-code-line-bg: rgba(129, 140, 248, 0.15);
 }

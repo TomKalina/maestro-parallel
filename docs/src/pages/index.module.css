@@ -1,18 +1,5 @@
-/* Rock-inspired: clean, bold, type-driven. No glow gimmicks.
-   Use Docusaurus light/dark color vars so the whole site stays coherent. */
-
-:root {
-  --mp-accent: #6366f1;
-  --mp-accent-hover: #818cf8;
-  --mp-muted: #6b7280;
-  --mp-border: rgba(127, 127, 127, 0.18);
-  --mp-card-bg: var(--ifm-background-surface-color);
-}
-
-[data-theme='dark'] {
-  --mp-muted: #9ca3af;
-  --mp-border: rgba(255, 255, 255, 0.12);
-}
+/* Landing page. Uses the project color palette from src/css/custom.css —
+   never touch Infima internals here. Source of truth: `--mp-*` tokens. */
 
 /* ---------- Hero ----------------------------------------------------- */
 
@@ -35,7 +22,7 @@
   padding: 0.35rem 0.85rem;
   font-size: 0.8rem;
   font-weight: 500;
-  color: var(--mp-muted);
+  color: var(--mp-text-muted);
   border: 1px solid var(--mp-border);
   border-radius: 999px;
   margin-bottom: 1.75rem;
@@ -47,7 +34,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #10b981;
+  background: var(--mp-success);
   box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
 }
 
@@ -57,24 +44,24 @@
   line-height: 1.05;
   letter-spacing: -0.03em;
   margin: 0 0 1.5rem;
-  color: var(--ifm-heading-color);
+  color: var(--mp-text);
 }
 
 .heroTagline {
   font-size: clamp(1.05rem, 1.4vw, 1.25rem);
   line-height: 1.55;
-  color: var(--mp-muted);
+  color: var(--mp-text-muted);
   max-width: 720px;
   margin: 0 auto 2.5rem;
 }
 
 .heroTagline code {
-  background: var(--mp-card-bg);
+  background: var(--mp-surface);
   border: 1px solid var(--mp-border);
   padding: 0.05em 0.4em;
   border-radius: 0.4em;
   font-size: 0.95em;
-  color: var(--ifm-color-content);
+  color: var(--mp-text);
 }
 
 .heroInstall {
@@ -83,7 +70,7 @@
 }
 
 .heroInstall pre {
-  background: var(--mp-card-bg);
+  background: var(--mp-surface);
   border: 1px solid var(--mp-border);
   border-radius: 0.8rem;
   padding: 1rem 1.25rem;
@@ -95,17 +82,17 @@
 
 .heroInstall code {
   font-family: var(--ifm-font-family-monospace);
-  color: var(--ifm-color-content);
+  color: var(--mp-text);
 }
 
 .heroPromptC {
-  color: var(--mp-accent);
+  color: var(--mp-brand);
   font-weight: 700;
   margin-right: 0.5rem;
 }
 
 .heroPromptW {
-  color: var(--ifm-color-content);
+  color: var(--mp-text);
 }
 
 .heroCtas {
@@ -129,26 +116,28 @@
 }
 
 .heroCtaPrimary {
-  background: var(--ifm-color-content);
-  color: var(--ifm-background-color);
+  background: var(--mp-brand);
+  color: var(--mp-brand-fg);
+  border-color: var(--mp-brand);
 }
 
 .heroCtaPrimary:hover {
-  background: var(--mp-accent);
-  color: white;
+  background: var(--mp-brand-hover);
+  border-color: var(--mp-brand-hover);
+  color: var(--mp-brand-fg);
   text-decoration: none;
 }
 
 .heroCtaSecondary {
   background: transparent;
-  color: var(--ifm-color-content);
-  border-color: var(--mp-border);
+  color: var(--mp-text);
+  border-color: var(--mp-border-strong);
 }
 
 .heroCtaSecondary:hover {
-  border-color: var(--ifm-color-content);
+  border-color: var(--mp-brand);
+  color: var(--mp-brand);
   text-decoration: none;
-  color: var(--ifm-color-content);
 }
 
 .heroGlow {
@@ -160,7 +149,7 @@
 .terminalSection {
   padding: 4rem 1.5rem 5rem;
   border-bottom: 1px solid var(--mp-border);
-  background: var(--mp-card-bg);
+  background: var(--mp-surface);
 }
 
 .terminalWrap {
@@ -245,14 +234,14 @@
 
 .featureCard {
   padding: 1.6rem 1.6rem 1.5rem;
-  background: var(--mp-card-bg);
+  background: var(--mp-surface);
   border: 1px solid var(--mp-border);
   border-radius: 0.8rem;
   transition: transform 150ms, border-color 150ms;
 }
 
 .featureCard:hover {
-  border-color: var(--mp-accent);
+  border-color: var(--mp-brand);
   transform: translateY(-2px);
 }
 
@@ -260,13 +249,13 @@
   font-size: 1.05rem;
   font-weight: 700;
   margin: 0 0 0.55rem;
-  color: var(--ifm-heading-color);
+  color: var(--mp-text);
 }
 
 .featureBody {
   margin: 0;
   font-size: 0.92rem;
-  color: var(--mp-muted);
+  color: var(--mp-text-muted);
   line-height: 1.55;
 }
 
@@ -275,7 +264,7 @@
 .finalSection {
   padding: 5rem 1.5rem 6rem;
   border-top: 1px solid var(--mp-border);
-  background: var(--mp-card-bg);
+  background: var(--mp-surface);
 }
 
 .finalInner {
