@@ -101,11 +101,6 @@ export interface FlowEvent {
 // Run Maestro on a single device. One process per device, plain `maestro test`
 // without --shard-all. Maestro 2.5+ fixed the Android dadb host port race so
 // multiple Maestro processes can target several Android devices at once.
-//
-// When `shard` is provided, the device runs only a slice of the flow set via
-// Maestro's `--shard-split=N --shard-index=i` (1-based). Callers compute the
-// per-group total + index and pass it in. Skip the shard params when total=1
-// (degenerate — Maestro treats split=1 as a no-op but the flag noise is ugly).
 export async function runDevice(
   d: Device,
   color: string,
@@ -114,13 +109,11 @@ export async function runDevice(
   outBase: string,
   config: ResolvedConfig,
   onEvent?: (e: FlowEvent) => void,
-  shard?: { index: number; total: number },
 ): Promise<RunResult> {
   const outDir = join(outBase, deviceSlug(d));
   await Deno.mkdir(outDir, { recursive: true });
 
   const isIosPhysical = d.platform === 'ios' && d.kind === 'usb';
-  const useShardSplit = shard !== undefined && shard.total > 1;
   const args = [
     'test',
     '-p',
@@ -139,9 +132,6 @@ export async function runDevice(
     // Maestro 2.5.x builds the iOS WebDriver on demand for physical iPhones
     // and needs a team to code-sign it. Pass through when configured.
     ...(isIosPhysical && config.appleTeamId ? ['--apple-team-id', config.appleTeamId] : []),
-    ...(useShardSplit
-      ? ['--shard-split', String(shard.total), '--shard-index', String(shard.index)]
-      : []),
     ...envFlags(config.maestroEnv),
     config.flowsDir,
   ];
@@ -279,10 +269,18 @@ export async function runDevice(
   return { device: d, exitCode, outDir };
 }
 
-// Run Maestro on a platform group as a SINGLE process with --shard-all=N.
-// Used for iOS when `iosShardAll: true` — the host XCTestDriver serialises
-// gestures across simulators and parallel Maestro processes collide with
-// "only one gesture can be performed at a time".
+// Run Maestro on a platform group as a SINGLE process.
+//
+//   mode='all'   — `--shard-all=N`: every flow runs on every device.
+//                  Used for iOS when `iosShardAll: true` — the host
+//                  XCTestDriver serialises gestures across simulators and
+//                  parallel Maestro processes collide with "only one gesture
+//                  can be performed at a time".
+//   mode='split' — `--shard-split=N`: flows distributed across the N devices,
+//                  each device runs a slice. Used when shardMode='split'.
+//                  Maestro 2.5+ handles the distribution itself; there is no
+//                  per-process `--shard-index` flag — the same single command
+//                  invocation drives all devices.
 export async function runShardGroup(
   platform: Platform,
   devices: Device[],
@@ -292,10 +290,14 @@ export async function runShardGroup(
   outBase: string,
   shardConfigPath: string | null,
   config: ResolvedConfig,
+  mode: 'all' | 'split' = 'all',
 ): Promise<GroupRunResult> {
-  const outDir = join(outBase, `${platform}-shard`);
+  const outDir = join(outBase, `${platform}-${mode === 'split' ? 'split' : 'shard'}`);
   await Deno.mkdir(outDir, { recursive: true });
   const ids = devices.map((d) => d.id);
+
+  const isIosPhysical = platform === 'ios' && devices.some((d) => d.kind === 'usb');
+  const shardFlag = mode === 'split' ? `--shard-split=${ids.length}` : `--shard-all=${ids.length}`;
 
   const args: string[] = [
     'test',
@@ -312,7 +314,8 @@ export async function runShardGroup(
     '--output',
     join(outDir, 'report.xml'),
     '--no-ansi',
-    `--shard-all=${ids.length}`,
+    shardFlag,
+    ...(isIosPhysical && config.appleTeamId ? ['--apple-team-id', config.appleTeamId] : []),
     ...(shardConfigPath ? ['--config', shardConfigPath] : []),
     ...envFlags(config.maestroEnv),
     config.flowsDir,
@@ -325,7 +328,7 @@ export async function runShardGroup(
   const prefix = `${color}[${padded}]${C.reset} `;
 
   log(
-    `${prefix}${C.bold}start${C.reset} ${ids.length} ${platform} devices in shard mode: ${
+    `${prefix}${C.bold}start${C.reset} ${ids.length} ${platform} devices in ${mode} mode: ${
       ids.join(', ')
     }`,
   );

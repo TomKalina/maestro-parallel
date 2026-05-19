@@ -203,17 +203,18 @@ export interface MaestroParallelConfig {
    *     Maximum coverage — each flow is verified against every OS version
    *     / form factor in the pool. Wall time ≈ longest flow set on the
    *     slowest device.
-   *   - `'split'`: flows are sharded across devices via Maestro's
-   *     `--shard-split=N --shard-index=i`. Each device runs a **slice**.
-   *     Wall time drops ~linearly with device count, but each flow runs
-   *     on only one device — you trade coverage for speed.
+   *   - `'split'`: flows are distributed across the devices via Maestro's
+   *     `--shard-split=N`. Each device runs a **slice**. Wall time drops
+   *     ~linearly with device count, but each flow runs on only one
+   *     device — you trade coverage for speed.
    *
    * Notes:
-   *   - When `'split'`, `iosSequential` is forced to `false` (sequential
-   *     + split = same total time as full).
-   *   - Mutually exclusive with `iosShardAll`: shardAll runs every flow
-   *     on each shard via a single Maestro process; split distributes
-   *     different flows across separate Maestro processes per device.
+   *   - Single-process model: one `maestro test --shard-split=N --device
+   *     id1,id2,…` per platform group. Maestro 2.5+ handles per-device
+   *     distribution internally — there is no separate `--shard-index`
+   *     flag in current Maestro CLI.
+   *   - Mutually exclusive with `iosShardAll`: shardAll replicates every
+   *     flow on each device, split distributes them. Pick one.
    *   - A group with only 1 device falls back to full mode silently
    *     (`--shard-split=1` has no effect).
    *
