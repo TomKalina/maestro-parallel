@@ -2,9 +2,12 @@
 
 [![JSR](https://jsr.io/badges/@kaln/maestro-parallel)](https://jsr.io/@kaln/maestro-parallel)
 [![npm](https://img.shields.io/npm/v/maestro-parallel.svg)](https://www.npmjs.com/package/maestro-parallel)
+[![Docs](https://img.shields.io/badge/docs-maestro--parallel.pages.dev-2563eb)](https://maestro-parallel.pages.dev)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 **One command. Every device. Real release builds.** Run [Maestro](https://maestro.mobile.dev/) E2E flows on every connected Android + iOS device in parallel — zero config in Expo / React Native projects.
+
+📚 **Full docs:** [maestro-parallel.pages.dev](https://maestro-parallel.pages.dev)
 
 <!-- TODO(demo): replace with VHS-recorded GIF of a real parallel run -->
 <!-- ![maestro-parallel demo](./docs/static/img/demo.gif) -->
