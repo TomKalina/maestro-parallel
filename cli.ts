@@ -29,6 +29,11 @@ Options:
                         > expo run:*) — fingerprint-cached, so repeat
                         runs land in seconds.
       --skip-clear      Skip clearing app data before tests.
+      --shard-split     Distribute flows across devices (each device runs a
+                        slice via Maestro --shard-split). Total wall time
+                        drops ~linearly with device count, but each flow
+                        runs on only one device — coverage trade-off.
+                        Equivalent to shardMode: 'split' in config.
       --cwd <path>      Project root (default: current directory).
       --apple-team-id <ID>
                         10-character Apple Developer Team ID. REQUIRED for
@@ -59,7 +64,7 @@ async function main(): Promise<void> {
   const args = parseArgs(Deno.args, {
     alias: { c: 'config', h: 'help', v: 'version' },
     string: ['config', 'cwd', 'apple-team-id'],
-    boolean: ['all', 'skip-build', 'skip-clear', 'help', 'version'],
+    boolean: ['all', 'skip-build', 'skip-clear', 'shard-split', 'help', 'version'],
   });
 
   if (args.help) {
@@ -108,6 +113,10 @@ async function main(): Promise<void> {
   const teamId = teamIdFromCli ?? config.appleTeamId ?? teamIdFromEnv;
   if (teamId) {
     config = { ...config, appleTeamId: teamId };
+  }
+
+  if (args['shard-split']) {
+    config = { ...config, shardMode: 'split' };
   }
 
   const code = await runMaestroParallel(config, {

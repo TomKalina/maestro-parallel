@@ -38,8 +38,13 @@ log files; the terminal stays clean. In non-TTY (CI), the checklist degrades to 
 maestro-parallel                              # auto-detect, build + run
 maestro-parallel --all                        # every device, no picker
 maestro-parallel --skip-build flow.yaml       # one flow, no rebuild
+maestro-parallel --shard-split --all          # split flows across devices for speed
 maestro-parallel setup-ios-sim                # one-off sim setup (also runs automatically)
 ```
+
+### Coverage vs. speed: `shardMode`
+
+By default every device runs the entire flow set (`shardMode: 'full'`) — full coverage across OS versions / form factors. Opt into `shardMode: 'split'` (CLI: `--shard-split`) to **distribute** flows across devices via Maestro's `--shard-split=N`: wall time drops ~linearly, but each flow runs on only one device. Use split for fast PR feedback, full for nightly regression. See [`docs/configuration#shardmode`](https://maestro-parallel.pages.dev/docs/configuration#shardmode-full--split).
 
 ## Auto-detected build defaults
 

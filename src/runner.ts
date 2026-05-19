@@ -101,6 +101,11 @@ export interface FlowEvent {
 // Run Maestro on a single device. One process per device, plain `maestro test`
 // without --shard-all. Maestro 2.5+ fixed the Android dadb host port race so
 // multiple Maestro processes can target several Android devices at once.
+//
+// When `shard` is provided, the device runs only a slice of the flow set via
+// Maestro's `--shard-split=N --shard-index=i` (1-based). Callers compute the
+// per-group total + index and pass it in. Skip the shard params when total=1
+// (degenerate — Maestro treats split=1 as a no-op but the flag noise is ugly).
 export async function runDevice(
   d: Device,
   color: string,
@@ -109,11 +114,13 @@ export async function runDevice(
   outBase: string,
   config: ResolvedConfig,
   onEvent?: (e: FlowEvent) => void,
+  shard?: { index: number; total: number },
 ): Promise<RunResult> {
   const outDir = join(outBase, deviceSlug(d));
   await Deno.mkdir(outDir, { recursive: true });
 
   const isIosPhysical = d.platform === 'ios' && d.kind === 'usb';
+  const useShardSplit = shard !== undefined && shard.total > 1;
   const args = [
     'test',
     '-p',
@@ -132,6 +139,9 @@ export async function runDevice(
     // Maestro 2.5.x builds the iOS WebDriver on demand for physical iPhones
     // and needs a team to code-sign it. Pass through when configured.
     ...(isIosPhysical && config.appleTeamId ? ['--apple-team-id', config.appleTeamId] : []),
+    ...(useShardSplit
+      ? ['--shard-split', String(shard.total), '--shard-index', String(shard.index)]
+      : []),
     ...envFlags(config.maestroEnv),
     config.flowsDir,
   ];

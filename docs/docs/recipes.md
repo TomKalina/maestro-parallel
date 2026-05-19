@@ -66,6 +66,31 @@ In your flow YAML:
     output.url = `${APP_BASE_URL}/healthcheck`;
 ```
 
+## Split flows across devices for speed
+
+Have 4 connected Androids and a flow suite that takes 10 min? `shardMode: 'split'` distributes flows across them, cutting wall time to ~2.5 min.
+
+```ts title="maestroparallel.config.ts"
+export default {
+  shardMode: 'split',
+};
+```
+
+Or one-off via CLI:
+
+```bash
+maestro-parallel --shard-split --all
+```
+
+**Trade-off** to remember:
+
+- ✅ Wall time drops ~linearly with device count.
+- ❌ Each flow runs on **only one** device — you lose multi-device validation (e.g. catching a bug that only reproduces on a Pixel 7a). Use `shardMode: 'full'` (the default) when coverage matters more than speed.
+- ⚠️ Don't mix with `iosShardAll` (mutually exclusive).
+- ⚠️ With split mode, `iosSequential` is forced off (sequential + split is degenerate).
+
+Use `shardMode: 'split'` for fast feedback on PR / CI runs, and stick with `'full'` for nightly regression suites where coverage matters most.
+
 ## Run on every connected device in CI
 
 ```bash

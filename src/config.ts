@@ -195,6 +195,31 @@ export interface MaestroParallelConfig {
    * project tolerates it. Default false.
    */
   concurrentBuilds?: boolean;
+
+  /**
+   * How flows are distributed across devices in a platform group.
+   *
+   *   - `'full'` (default): every device runs the **entire** flow set.
+   *     Maximum coverage — each flow is verified against every OS version
+   *     / form factor in the pool. Wall time ≈ longest flow set on the
+   *     slowest device.
+   *   - `'split'`: flows are sharded across devices via Maestro's
+   *     `--shard-split=N --shard-index=i`. Each device runs a **slice**.
+   *     Wall time drops ~linearly with device count, but each flow runs
+   *     on only one device — you trade coverage for speed.
+   *
+   * Notes:
+   *   - When `'split'`, `iosSequential` is forced to `false` (sequential
+   *     + split = same total time as full).
+   *   - Mutually exclusive with `iosShardAll`: shardAll runs every flow
+   *     on each shard via a single Maestro process; split distributes
+   *     different flows across separate Maestro processes per device.
+   *   - A group with only 1 device falls back to full mode silently
+   *     (`--shard-split=1` has no effect).
+   *
+   * CLI: `--shard-split` overrides this to `'split'`.
+   */
+  shardMode?: 'full' | 'split';
 }
 
 /** Identity helper for type-safe config in `.ts` config files. */
@@ -236,11 +261,20 @@ export function resolveConfig(c: MaestroParallelConfig): ResolvedConfig {
       "Invalid config: 'iosSequential' and 'iosShardAll' are mutually exclusive. shard-all already runs every sim through a single Maestro process; sequential makes no sense alongside it.",
     );
   }
+  if (c.shardMode === 'split' && c.iosShardAll) {
+    throw new Error(
+      "Invalid config: shardMode 'split' and 'iosShardAll' are mutually exclusive. shard-all runs every flow on each shard via a single Maestro process; split distributes different flows across separate processes per device. Pick one.",
+    );
+  }
   if (c.keepRuns !== undefined && (!Number.isInteger(c.keepRuns) || c.keepRuns < 1)) {
     throw new Error(
       `Invalid config: 'keepRuns' must be a positive integer (got ${c.keepRuns}). Prune would otherwise delete the current run directory.`,
     );
   }
+  const shardMode = c.shardMode ?? 'full';
+  // Sequential + split is degenerate: one device at a time on a slice = same
+  // total wall time as full mode. Force concurrent iOS when splitting.
+  const iosSequential = shardMode === 'split' ? false : (c.iosSequential ?? true);
   return {
     bundleId: c.bundleId,
     flowsDir: c.flowsDir ?? '.maestro',
@@ -250,7 +284,7 @@ export function resolveConfig(c: MaestroParallelConfig): ResolvedConfig {
     maestroEnv: c.maestroEnv ?? {},
     build: c.build,
     hooks: c.hooks,
-    iosSequential: c.iosSequential ?? true,
+    iosSequential,
     iosShardAll: c.iosShardAll ?? false,
     processStartStaggerMs: c.processStartStaggerMs ?? 2000,
     appleTeamId: c.appleTeamId,
@@ -258,6 +292,7 @@ export function resolveConfig(c: MaestroParallelConfig): ResolvedConfig {
     buildStrategy: c.buildStrategy,
     buildEnv: c.buildEnv,
     concurrentBuilds: c.concurrentBuilds ?? false,
+    shardMode,
   };
 }
 

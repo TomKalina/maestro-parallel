@@ -85,6 +85,18 @@ Env merged into the auto-detected build child (Rock / EAS / expo run:*). Has no 
 ### `concurrentBuilds?: boolean`
 Run platform groups (android, ios-sim, ios-usb) in parallel instead of sequentially. Wall time drops to `max(group)` instead of `sum`. **Default false.** RAM/CPU/disk pressure multiplies — three xcodebuild/gradle/Metro pipelines at once can OOM a 16 GB Mac and the Pods cache may race. Enable only on beefy machines (M-series with ≥ 32 GB).
 
+### `shardMode?: 'full' | 'split'`
+How flows are distributed across devices in a platform group. Default `'full'`.
+
+- **`'full'`** — every device runs the entire flow set (current default). Verifies each flow on every OS version / form factor in the pool. Wall time ≈ longest flow set on the slowest device.
+- **`'split'`** — flows are sharded across devices via Maestro `--shard-split=N --shard-index=i`. Each device runs a slice. Wall time drops ~linearly with device count, but **each flow runs on only one device** — coverage trade-off.
+
+CLI flag `--shard-split` overrides to `'split'`. Notes:
+
+- When `'split'`, `iosSequential` is forced to `false` in the resolved config (sequential + split = same total time as full).
+- Mutually exclusive with `iosShardAll` — set one or the other, not both.
+- Platform groups with only 1 device fall back to `'full'` silently (no `--shard-split=1` flag emitted).
+
 ## Fingerprint-based build cache
 
 mp uses `@expo/fingerprint` — the same library Rock and Expo Build Cache use internally — to skip the build hook entirely when nothing native has changed. State stored at `.maestro/output/.fingerprint-<group>.json` (per platform group).

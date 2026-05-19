@@ -435,12 +435,28 @@ export async function runMaestroParallel(
     else tl.fail(i);
   };
 
+  // When shardMode is 'split', each device runs only its slice of the flow set
+  // via Maestro's --shard-split=N --shard-index=i. Group with only 1 device:
+  // runDevice will silently drop the flag (no point splitting into 1).
+  const splitting = resolved.shardMode === 'split';
+  const shardOf = (i: number, total: number) =>
+    splitting ? { index: i + 1, total } : undefined;
+
   // Android: parallel processes, own stagger counter.
   const androidStagger = makeStagger();
   const androidPromise = Promise.all(
-    androidDevices.map((d) =>
+    androidDevices.map((d, i) =>
       androidStagger(() =>
-        runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved, useEvents ? onEvent : undefined)
+        runDevice(
+          d,
+          colorOf(d),
+          prefixWidth,
+          cwd,
+          outBase,
+          resolved,
+          useEvents ? onEvent : undefined,
+          shardOf(i, androidDevices.length),
+        )
       ).then(
         (r) => {
           results.push(r);
@@ -476,8 +492,20 @@ export async function runMaestroParallel(
     }
     if (resolved.iosSequential) {
       // Sequential: previous finishes before next starts — no stagger needed.
-      for (const d of iosDevices) {
-        const r = await runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved, onEvent);
+      // resolveConfig forces iosSequential=false in split mode, so shardOf is
+      // a no-op here in practice; pass it through for symmetry/safety.
+      for (let i = 0; i < iosDevices.length; i++) {
+        const d = iosDevices[i]!;
+        const r = await runDevice(
+          d,
+          colorOf(d),
+          prefixWidth,
+          cwd,
+          outBase,
+          resolved,
+          onEvent,
+          shardOf(i, iosDevices.length),
+        );
         results.push(r);
         finishDevice(d, r.exitCode);
       }
@@ -486,8 +514,19 @@ export async function runMaestroParallel(
     // Parallel iOS: own stagger counter, independent of Android's.
     const iosStagger = makeStagger();
     await Promise.all(
-      iosDevices.map((d) =>
-        iosStagger(() => runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved, onEvent)).then(
+      iosDevices.map((d, i) =>
+        iosStagger(() =>
+          runDevice(
+            d,
+            colorOf(d),
+            prefixWidth,
+            cwd,
+            outBase,
+            resolved,
+            onEvent,
+            shardOf(i, iosDevices.length),
+          )
+        ).then(
           (r) => {
             results.push(r);
             finishDevice(d, r.exitCode);
