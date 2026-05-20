@@ -269,10 +269,18 @@ export async function runDevice(
   return { device: d, exitCode, outDir };
 }
 
-// Run Maestro on a platform group as a SINGLE process with --shard-all=N.
-// Used for iOS when `iosShardAll: true` — the host XCTestDriver serialises
-// gestures across simulators and parallel Maestro processes collide with
-// "only one gesture can be performed at a time".
+// Run Maestro on a platform group as a SINGLE process.
+//
+//   mode='all'   — `--shard-all=N`: every flow runs on every device.
+//                  Used for iOS when `iosShardAll: true` — the host
+//                  XCTestDriver serialises gestures across simulators and
+//                  parallel Maestro processes collide with "only one gesture
+//                  can be performed at a time".
+//   mode='split' — `--shard-split=N`: flows distributed across the N devices,
+//                  each device runs a slice. Used when shardMode='split'.
+//                  Maestro 2.5+ handles the distribution itself; there is no
+//                  per-process `--shard-index` flag — the same single command
+//                  invocation drives all devices.
 export async function runShardGroup(
   platform: Platform,
   devices: Device[],
@@ -282,10 +290,14 @@ export async function runShardGroup(
   outBase: string,
   shardConfigPath: string | null,
   config: ResolvedConfig,
+  mode: 'all' | 'split' = 'all',
 ): Promise<GroupRunResult> {
-  const outDir = join(outBase, `${platform}-shard`);
+  const outDir = join(outBase, `${platform}-${mode === 'split' ? 'split' : 'shard'}`);
   await Deno.mkdir(outDir, { recursive: true });
   const ids = devices.map((d) => d.id);
+
+  const isIosPhysical = platform === 'ios' && devices.some((d) => d.kind === 'usb');
+  const shardFlag = mode === 'split' ? `--shard-split=${ids.length}` : `--shard-all=${ids.length}`;
 
   const args: string[] = [
     'test',
@@ -302,7 +314,8 @@ export async function runShardGroup(
     '--output',
     join(outDir, 'report.xml'),
     '--no-ansi',
-    `--shard-all=${ids.length}`,
+    shardFlag,
+    ...(isIosPhysical && config.appleTeamId ? ['--apple-team-id', config.appleTeamId] : []),
     ...(shardConfigPath ? ['--config', shardConfigPath] : []),
     ...envFlags(config.maestroEnv),
     config.flowsDir,
@@ -315,7 +328,7 @@ export async function runShardGroup(
   const prefix = `${color}[${padded}]${C.reset} `;
 
   log(
-    `${prefix}${C.bold}start${C.reset} ${ids.length} ${platform} devices in shard mode: ${
+    `${prefix}${C.bold}start${C.reset} ${ids.length} ${platform} devices in ${mode} mode: ${
       ids.join(', ')
     }`,
   );

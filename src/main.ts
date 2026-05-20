@@ -435,26 +435,76 @@ export async function runMaestroParallel(
     else tl.fail(i);
   };
 
-  // Android: parallel processes, own stagger counter.
-  const androidStagger = makeStagger();
-  const androidPromise = Promise.all(
-    androidDevices.map((d) =>
-      androidStagger(() =>
-        runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved, useEvents ? onEvent : undefined)
-      ).then(
-        (r) => {
-          results.push(r);
-          finishDevice(d, r.exitCode);
-        },
-      )
-    ),
-  );
+  // When shardMode='split' and a platform group has >1 device, run a SINGLE
+  // Maestro process per group with `--shard-split=N`. Maestro 2.5+ handles
+  // the per-device distribution internally — there is no `--shard-index`
+  // flag, the whole group is driven by one invocation that takes
+  // `--device id1,id2,...`. Groups with 1 device fall back to the normal
+  // per-device path silently.
+  const splitting = resolved.shardMode === 'split';
 
-  // iOS: sequential by default — XCTestService races on per-sim ports when
-  // multiple iOS simulators are driven concurrently. Opt into shard-all
-  // when the user knows their setup tolerates it.
+  // Android: split → one process, full → parallel processes.
+  const androidPromise = (async () => {
+    if (androidDevices.length === 0) return;
+    if (splitting && androidDevices.length > 1) {
+      const shardConfig = await makeShardConfig(cwd, resolved.maestroConfigPath, outBase);
+      const color = colorOf(androidDevices[0]!);
+      const group = await runShardGroup(
+        'android',
+        androidDevices,
+        color,
+        prefixWidth,
+        cwd,
+        outBase,
+        shardConfig,
+        resolved,
+        'split',
+      );
+      for (const d of androidDevices) {
+        results.push({ device: d, exitCode: group.exitCode, outDir: group.outDir });
+        finishDevice(d, group.exitCode);
+      }
+      return;
+    }
+    const androidStagger = makeStagger();
+    await Promise.all(
+      androidDevices.map((d) =>
+        androidStagger(() =>
+          runDevice(d, colorOf(d), prefixWidth, cwd, outBase, resolved, useEvents ? onEvent : undefined)
+        ).then(
+          (r) => {
+            results.push(r);
+            finishDevice(d, r.exitCode);
+          },
+        )
+      ),
+    );
+  })();
+
+  // iOS: split / shard-all → one process; otherwise sequential (default) or
+  // parallel staggered processes.
   const iosPromise = (async () => {
     if (iosDevices.length === 0) return;
+    if (splitting && iosDevices.length > 1) {
+      const shardConfig = await makeShardConfig(cwd, resolved.maestroConfigPath, outBase);
+      const color = colorOf(iosDevices[0]!);
+      const group = await runShardGroup(
+        'ios',
+        iosDevices,
+        color,
+        prefixWidth,
+        cwd,
+        outBase,
+        shardConfig,
+        resolved,
+        'split',
+      );
+      for (const d of iosDevices) {
+        results.push({ device: d, exitCode: group.exitCode, outDir: group.outDir });
+        finishDevice(d, group.exitCode);
+      }
+      return;
+    }
     if (resolved.iosShardAll) {
       const shardConfig = await makeShardConfig(cwd, resolved.maestroConfigPath, outBase);
       const color = colorOf(iosDevices[0]!);
@@ -467,6 +517,7 @@ export async function runMaestroParallel(
         outBase,
         shardConfig,
         resolved,
+        'all',
       );
       for (const d of iosDevices) {
         results.push({ device: d, exitCode: group.exitCode, outDir: group.outDir });

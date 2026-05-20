@@ -17,6 +17,7 @@ maestro-parallel setup-ios-sim         Disable AutoFill on every booted sim
 | `--all` | Run on every discovered device (skip the picker). |
 | `--skip-build` | Don't build or install; use whatever is already on each device. Useful for iterating on flow YAML against a stable build. |
 | `--skip-clear` | Skip `pm clear` / sim data wipe before tests. |
+| `--shard-split` | Distribute flows across devices in each platform group via Maestro `--shard-split`. Total wall time drops ~linearly with device count; each flow runs on only one device (coverage trade-off). Equivalent to `shardMode: 'split'` in config. |
 | `--cwd <path>` | Project root. Default: current directory. |
 | `--apple-team-id <ID>` | 10-character Apple Developer Team ID. Required for physical iOS. Overrides config + `MAESTRO_APPLE_TEAM_ID` env. |
 | `-h, --help` | Show help. |
@@ -40,6 +41,9 @@ maestro-parallel --all
 
 # Re-run flows without rebuilding
 maestro-parallel --skip-build .maestro/login.yaml
+
+# Split flow set across all connected devices for speed
+maestro-parallel --shard-split --all
 
 # Explicit config
 maestro-parallel --config ./e2e.config.ts
